@@ -38,8 +38,11 @@ func (f *fakeDeepSeekCaller) GetPow(context.Context, *auth.RequestAuth, int) (st
 	return "pow", nil
 }
 
-func (f *fakeDeepSeekCaller) UploadFile(_ context.Context, _ *auth.RequestAuth, req dsclient.UploadFileRequest, _ int) (*dsclient.UploadFileResult, error) {
+func (f *fakeDeepSeekCaller) UploadFile(_ context.Context, a *auth.RequestAuth, req dsclient.UploadFileRequest, _ int) (*dsclient.UploadFileResult, error) {
 	f.uploads = append(f.uploads, req)
+	if a != nil && a.AccountID != "" {
+		return &dsclient.UploadFileResult{ID: "file-runtime-" + a.AccountID}, nil
+	}
 	return &dsclient.UploadFileResult{ID: "file-runtime-1"}, nil
 }
 
@@ -159,6 +162,66 @@ func TestExecuteNonStreamWithRetrySwitchesManagedAccountBeforeFinal429(t *testin
 	}
 	if prompt, _ := ds.payloads[2]["prompt"].(string); strings.Contains(prompt, "Previous reply had no visible output") {
 		t.Fatalf("expected fresh switched-account prompt without empty-output suffix, got %q", prompt)
+	}
+}
+
+func TestExecuteNonStreamWithRetryReuploadsCurrentInputFileAfterAccountSwitch(t *testing.T) {
+	t.Setenv("DS2API_CONFIG_JSON", `{
+		"keys":["managed-key"],
+		"accounts":[
+			{"email":"acc1@test.com","password":"pwd"},
+			{"email":"acc2@test.com","password":"pwd"}
+		]
+	}`)
+	store := config.LoadStore()
+	resolver := auth.NewResolver(store, account.NewPool(store), func(_ context.Context, acc config.Account) (string, error) {
+		return "token-" + acc.Identifier(), nil
+	})
+	req, _ := http.NewRequest(http.MethodPost, "/", nil)
+	req.Header.Set("Authorization", "Bearer managed-key")
+	a, err := resolver.Determine(req)
+	if err != nil {
+		t.Fatalf("determine failed: %v", err)
+	}
+	defer resolver.Release(a)
+
+	ds := &fakeDeepSeekCaller{
+		sessionByAccount: true,
+		responses: []*http.Response{
+			sseHTTPResponse(http.StatusOK, `data: {"response_message_id":11,"p":"response/thinking_content","v":"first empty"}`),
+			sseHTTPResponse(http.StatusOK, `data: {"response_message_id":12,"p":"response/thinking_content","v":"retry empty"}`),
+			sseHTTPResponse(http.StatusOK, `data: {"response_message_id":21,"p":"response/content","v":"ok from second account"}`),
+		},
+	}
+	stdReq := promptcompat.StandardRequest{
+		Surface:        "test",
+		RequestedModel: "deepseek-v4-flash",
+		ResolvedModel:  "deepseek-v4-flash",
+		ResponseModel:  "deepseek-v4-flash",
+		Messages: []any{
+			map[string]any{"role": "user", "content": "large current input"},
+		},
+		PromptTokenText: "large current input",
+		FinalPrompt:     "large current input",
+		Thinking:        true,
+	}
+
+	result, outErr := ExecuteNonStreamWithRetry(context.Background(), ds, a, stdReq, Options{
+		RetryEnabled:     true,
+		CurrentInputFile: currentInputRuntimeConfig{},
+	})
+	if outErr != nil {
+		t.Fatalf("unexpected output error after account switch retry: %#v", outErr)
+	}
+	if result.Turn.Text != "ok from second account" {
+		t.Fatalf("text mismatch after switch retry: %q", result.Turn.Text)
+	}
+	if len(ds.uploads) != 2 {
+		t.Fatalf("expected current input file uploaded once per account, got %d", len(ds.uploads))
+	}
+	refIDs, _ := ds.payloads[2]["ref_file_ids"].([]any)
+	if len(refIDs) != 1 || refIDs[0] != "file-runtime-acc2@test.com" {
+		t.Fatalf("expected switched account ref_file_ids to use reuploaded file, got %#v", ds.payloads[2]["ref_file_ids"])
 	}
 }
 

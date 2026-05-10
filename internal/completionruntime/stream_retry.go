@@ -9,7 +9,9 @@ import (
 	"ds2api/internal/assistantturn"
 	"ds2api/internal/auth"
 	"ds2api/internal/config"
+	"ds2api/internal/httpapi/openai/history"
 	"ds2api/internal/httpapi/openai/shared"
+	"ds2api/internal/promptcompat"
 )
 
 type StreamRetryOptions struct {
@@ -19,6 +21,8 @@ type StreamRetryOptions struct {
 	RetryMaxAttempts int
 	MaxAttempts      int
 	UsagePrompt      string
+	Request          promptcompat.StandardRequest
+	CurrentInputFile history.CurrentInputConfigReader
 }
 
 type StreamRetryHooks struct {
@@ -71,7 +75,7 @@ func ExecuteStreamWithRetry(ctx context.Context, ds DeepSeekCaller, a *auth.Requ
 
 		if attempts >= retryMax {
 			if canRetryOnAlternateAccount(ctx, a, &assistantturn.OutputError{Status: http.StatusTooManyRequests}, opts.RetryEnabled, &accountSwitchAttempted) {
-				switched, switchErr := startPayloadCompletionOnAlternateAccount(ctx, ds, a, payload, maxAttempts)
+				switched, switchErr := startPayloadCompletionOnAlternateAccount(ctx, ds, a, payload, opts, maxAttempts)
 				if switchErr != nil {
 					if hooks.OnRetryFailure != nil {
 						hooks.OnRetryFailure(switchErr.Status, switchErr.Message, switchErr.Code)
@@ -142,7 +146,7 @@ func ExecuteStreamWithRetry(ctx context.Context, ds DeepSeekCaller, a *auth.Requ
 	}
 }
 
-func startPayloadCompletionOnAlternateAccount(ctx context.Context, ds DeepSeekCaller, a *auth.RequestAuth, payload map[string]any, maxAttempts int) (StartResult, *assistantturn.OutputError) {
+func startPayloadCompletionOnAlternateAccount(ctx context.Context, ds DeepSeekCaller, a *auth.RequestAuth, payload map[string]any, opts StreamRetryOptions, maxAttempts int) (StartResult, *assistantturn.OutputError) {
 	sessionID, err := ds.CreateSession(ctx, a, maxAttempts)
 	if err != nil {
 		return StartResult{}, authOutputError(a)
@@ -152,6 +156,13 @@ func startPayloadCompletionOnAlternateAccount(ctx context.Context, ds DeepSeekCa
 		return StartResult{SessionID: sessionID}, &assistantturn.OutputError{Status: http.StatusUnauthorized, Message: "Failed to get PoW (invalid token or unknown error).", Code: "error"}
 	}
 	nextPayload := clonePayload(payload)
+	if opts.CurrentInputFile != nil && opts.Request.CurrentInputFileApplied {
+		stdReq, prepErr := reuploadCurrentInputFileForAccount(ctx, ds, a, opts.Request, Options{CurrentInputFile: opts.CurrentInputFile})
+		if prepErr != nil {
+			return StartResult{SessionID: sessionID}, prepErr
+		}
+		nextPayload = stdReq.CompletionPayload(sessionID)
+	}
 	nextPayload["chat_session_id"] = sessionID
 	delete(nextPayload, "parent_message_id")
 	resp, err := ds.CallCompletion(ctx, a, nextPayload, pow, maxAttempts)

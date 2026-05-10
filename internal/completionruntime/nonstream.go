@@ -114,7 +114,7 @@ func ExecuteNonStreamStartedWithRetry(ctx context.Context, ds DeepSeekCaller, a 
 		turn, outErr := collectAttempt(currentResp, stdReq, usagePrompt, opts)
 		if outErr != nil {
 			if canRetryOnAlternateAccount(ctx, a, outErr, opts.RetryEnabled, &accountSwitchAttempted) {
-				switched, switchErr := startStandardCompletionOnAlternateAccount(ctx, ds, a, stdReq, maxAttempts)
+				switched, switchErr := startStandardCompletionOnAlternateAccount(ctx, ds, a, stdReq, opts, maxAttempts)
 				if switchErr != nil {
 					return NonStreamResult{SessionID: sessionID, Payload: payload, Attempts: attempts}, switchErr
 				}
@@ -154,7 +154,7 @@ func ExecuteNonStreamStartedWithRetry(ctx context.Context, ds DeepSeekCaller, a 
 		}
 		if !opts.RetryEnabled || !assistantturn.ShouldRetryEmptyOutput(turn, attempts, retryMax) {
 			if canRetryOnAlternateAccount(ctx, a, turn.Error, opts.RetryEnabled, &accountSwitchAttempted) {
-				switched, switchErr := startStandardCompletionOnAlternateAccount(ctx, ds, a, stdReq, maxAttempts)
+				switched, switchErr := startStandardCompletionOnAlternateAccount(ctx, ds, a, stdReq, opts, maxAttempts)
 				if switchErr != nil {
 					return NonStreamResult{SessionID: sessionID, Payload: payload, Turn: turn, Attempts: attempts}, switchErr
 				}
@@ -205,7 +205,12 @@ func canRetryOnAlternateAccount(ctx context.Context, a *auth.RequestAuth, outErr
 	return a.SwitchAccount(ctx)
 }
 
-func startStandardCompletionOnAlternateAccount(ctx context.Context, ds DeepSeekCaller, a *auth.RequestAuth, stdReq promptcompat.StandardRequest, maxAttempts int) (StartResult, *assistantturn.OutputError) {
+func startStandardCompletionOnAlternateAccount(ctx context.Context, ds DeepSeekCaller, a *auth.RequestAuth, stdReq promptcompat.StandardRequest, opts Options, maxAttempts int) (StartResult, *assistantturn.OutputError) {
+	var prepErr *assistantturn.OutputError
+	stdReq, prepErr = reuploadCurrentInputFileForAccount(ctx, ds, a, stdReq, opts)
+	if prepErr != nil {
+		return StartResult{Request: stdReq}, prepErr
+	}
 	sessionID, err := ds.CreateSession(ctx, a, maxAttempts)
 	if err != nil {
 		return StartResult{}, authOutputError(a)
@@ -220,6 +225,18 @@ func startStandardCompletionOnAlternateAccount(ctx context.Context, ds DeepSeekC
 		return StartResult{SessionID: sessionID, Payload: payload, Pow: pow}, &assistantturn.OutputError{Status: http.StatusInternalServerError, Message: "Failed to get completion.", Code: "error"}
 	}
 	return StartResult{SessionID: sessionID, Payload: payload, Pow: pow, Response: resp, Request: stdReq}, nil
+}
+
+func reuploadCurrentInputFileForAccount(ctx context.Context, ds DeepSeekCaller, a *auth.RequestAuth, stdReq promptcompat.StandardRequest, opts Options) (promptcompat.StandardRequest, *assistantturn.OutputError) {
+	if opts.CurrentInputFile == nil || !stdReq.CurrentInputFileApplied {
+		return stdReq, nil
+	}
+	out, err := (history.Service{Store: opts.CurrentInputFile, DS: ds}).ReuploadAppliedCurrentInputFile(ctx, a, stdReq)
+	if err != nil {
+		status, message := history.MapError(err)
+		return out, &assistantturn.OutputError{Status: status, Message: message, Code: "error"}
+	}
+	return out, nil
 }
 
 func collectAttempt(resp *http.Response, stdReq promptcompat.StandardRequest, usagePrompt string, opts Options) (assistantturn.Turn, *assistantturn.OutputError) {

@@ -47,10 +47,10 @@ func TestBuildOpenAIFinalPrompt_HandlerPathIncludesToolRoundtripSemantics(t *tes
 	if !strings.Contains(finalPrompt, `"condition":"sunny"`) {
 		t.Fatalf("handler finalPrompt should preserve tool output content: %q", finalPrompt)
 	}
-	if !strings.Contains(finalPrompt, "<｜DSML｜tool_calls>") {
+	if !strings.Contains(finalPrompt, "<|DSML|tool_calls>") {
 		t.Fatalf("handler finalPrompt should preserve assistant tool history: %q", finalPrompt)
 	}
-	if !strings.Contains(finalPrompt, `<｜DSML｜invoke name="get_weather">`) {
+	if !strings.Contains(finalPrompt, `<|DSML|invoke name="get_weather">`) {
 		t.Fatalf("handler finalPrompt should include tool name history: %q", finalPrompt)
 	}
 }
@@ -74,7 +74,7 @@ func TestBuildOpenAIFinalPrompt_VercelPreparePathKeepsFinalAnswerInstruction(t *
 	}
 
 	finalPrompt, _ := buildOpenAIFinalPrompt(messages, tools, "", false)
-	if !strings.Contains(finalPrompt, "Remember: The ONLY valid way to use tools is the <｜DSML｜tool_calls>...</｜DSML｜tool_calls> block at the end of your response.") {
+	if !strings.Contains(finalPrompt, "Remember: The ONLY valid way to use tools is the <|DSML|tool_calls>...</|DSML|tool_calls> block at the end of your response.") {
 		t.Fatalf("vercel prepare finalPrompt missing final tool-call anchor instruction: %q", finalPrompt)
 	}
 	if !strings.Contains(finalPrompt, "TOOL CALL FORMAT") {
@@ -85,6 +85,67 @@ func TestBuildOpenAIFinalPrompt_VercelPreparePathKeepsFinalAnswerInstruction(t *
 	}
 	if strings.Contains(finalPrompt, "```json") {
 		t.Fatalf("vercel prepare finalPrompt should not require fenced tool calls: %q", finalPrompt)
+	}
+}
+
+func TestBuildOpenAIPromptWithToolInstructionsOnlyOmitsSchemas(t *testing.T) {
+	messages := []any{
+		map[string]any{"role": "system", "content": "You are helpful"},
+		map[string]any{"role": "user", "content": "请调用工具"},
+	}
+	tools := []any{
+		map[string]any{
+			"type": "function",
+			"function": map[string]any{
+				"name":        "search",
+				"description": "search docs",
+				"parameters": map[string]any{
+					"type": "object",
+				},
+			},
+		},
+	}
+
+	finalPrompt, toolNames := BuildOpenAIPromptWithToolInstructionsOnly(messages, tools, "", DefaultToolChoicePolicy(), false)
+	if len(toolNames) != 1 || toolNames[0] != "search" {
+		t.Fatalf("unexpected tool names: %#v", toolNames)
+	}
+	if strings.Contains(finalPrompt, "You have access to these tools") || strings.Contains(finalPrompt, "Description: search docs") || strings.Contains(finalPrompt, "Parameters:") {
+		t.Fatalf("tool descriptions should be externalized, got: %q", finalPrompt)
+	}
+	if !strings.Contains(finalPrompt, "Treat DS2API_TOOLS.txt as the authoritative list of callable tools and schemas") {
+		t.Fatalf("expected instructions-only prompt to point model at tools file, got: %q", finalPrompt)
+	}
+	if !strings.Contains(finalPrompt, "TOOL CALL FORMAT") || !strings.Contains(finalPrompt, "Remember: The ONLY valid way to use tools") {
+		t.Fatalf("expected tool format instructions to remain in live prompt, got: %q", finalPrompt)
+	}
+}
+
+func TestBuildOpenAIToolsContextTranscriptContainsOnlyDescriptions(t *testing.T) {
+	tools := []any{
+		map[string]any{
+			"type": "function",
+			"function": map[string]any{
+				"name":        "search",
+				"description": "search docs",
+				"parameters": map[string]any{
+					"type": "object",
+				},
+			},
+		},
+	}
+
+	transcript, toolNames := BuildOpenAIToolsContextTranscript(tools, DefaultToolChoicePolicy())
+	if len(toolNames) != 1 || toolNames[0] != "search" {
+		t.Fatalf("unexpected tool names: %#v", toolNames)
+	}
+	for _, want := range []string{"# DS2API_TOOLS.txt", "You have access to these tools", "Tool: search", "Description: search docs", `Parameters: {"type":"object"}`} {
+		if !strings.Contains(transcript, want) {
+			t.Fatalf("expected tools transcript to contain %q, got: %q", want, transcript)
+		}
+	}
+	if strings.Contains(transcript, "TOOL CALL FORMAT") || strings.Contains(transcript, "<|DSML|tool_calls>") {
+		t.Fatalf("tools transcript should not duplicate format instructions, got: %q", transcript)
 	}
 }
 
