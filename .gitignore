@@ -1,7 +1,7 @@
 *.bak
 config.json
 .env
-
+DS2API_CONFIG_BASE64.txt
 # IDE
 .vscode/
 .idea/
