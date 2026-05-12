@@ -13,6 +13,7 @@ import (
 	"ds2api/internal/config"
 	"ds2api/internal/httpapi/openai/history"
 	"ds2api/internal/promptcompat"
+	"ds2api/internal/usagelog"
 	"ds2api/internal/util"
 
 	"github.com/google/uuid"
@@ -146,12 +147,39 @@ func (h *Handler) handleVercelStreamRelease(w http.ResponseWriter, r *http.Reque
 		writeOpenAIError(w, http.StatusNotFound, "stream lease not found")
 		return
 	}
-	if h.Auth != nil && lease.Auth != nil {
-		defer h.Auth.Release(lease.Auth)
-	}
+
 	if lease.Auth != nil {
+		if rawUsage, hasUsage := req["usage"].(map[string]any); hasUsage {
+			elapsedMs := toInt(rawUsage["elapsed_ms"])
+			if elapsedMs <= 0 {
+				elapsedMs = 1 // Prevent 0ms
+			}
+			preview := lease.Standard.FinalPrompt
+			if len(preview) > 200 {
+				preview = preview[:197] + "..."
+			}
+
+			params := usagelog.LogParams{
+				CallerID:         lease.Auth.CallerID,
+				AccountID:        lease.Auth.AccountID,
+				Surface:          "chat.completions",
+				Model:            toString(rawUsage["model"]),
+				Stream:           true,
+				StatusCode:       200,
+				ElapsedMs:        int64(elapsedMs),
+				PromptTokens:     toInt(rawUsage["prompt_tokens"]),
+				OutputTokens:     toInt(rawUsage["output_tokens"]),
+				ReasoningTokens:  toInt(rawUsage["reasoning_tokens"]),
+				FinishReason:     toString(rawUsage["finish_reason"]),
+				UserInputPreview: preview,
+			}
+			usagelog.GlobalStore().Log(params)
+		}
+
+		defer h.Auth.Release(lease.Auth)
 		h.autoDeleteRemoteSession(r.Context(), lease.Auth, lease.SessionID)
 	}
+
 	writeJSON(w, http.StatusOK, map[string]any{"success": true})
 }
 
@@ -435,4 +463,25 @@ func streamLeaseTTL() time.Duration {
 
 func newLeaseID() string {
 	return strings.ReplaceAll(uuid.NewString(), "-", "")
+}
+
+func toInt(v any) int {
+	switch val := v.(type) {
+	case float64:
+		return int(val)
+	case int:
+		return val
+	case string:
+		i, _ := strconv.Atoi(val)
+		return i
+	default:
+		return 0
+	}
+}
+
+func toString(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
 }

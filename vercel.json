@@ -106,11 +106,11 @@
       "destination": "/admin/assets/$1"
     },
     {
-      "source": "/admin/usage(.*)",
+      "source": "/admin/usage/(.*)",
       "destination": "/api/index"
     },
     {
-      "source": "/admin/monitor(.*)",
+      "source": "/admin/monitor/(.*)",
       "destination": "/api/index"
     },
     {

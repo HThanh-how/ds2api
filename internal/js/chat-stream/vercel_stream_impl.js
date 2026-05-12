@@ -171,7 +171,8 @@ async function handleVercelStream(req, res, rawBody, payload) {
       res.flushHeaders();
     }
 
-    const created = Math.floor(Date.now() / 1000);
+    const streamStartTime = Date.now();
+    const created = Math.floor(streamStartTime / 1000);
     let currentType = thinkingEnabled ? 'thinking' : 'text';
     let thinkingText = '';
     let outputText = '';
@@ -198,9 +199,23 @@ async function handleVercelStream(req, res, rawBody, payload) {
       if (ended) {
         return true;
       }
+      
+      const prepareUsageData = () => {
+        const usage = buildUsage(usagePrompt, thinkingText, outputText);
+        return {
+          prompt_tokens: usage.prompt_tokens || 0,
+          output_tokens: usage.completion_tokens || 0,
+          reasoning_tokens: (usage.completion_tokens_details && usage.completion_tokens_details.reasoning_tokens) ? usage.completion_tokens_details.reasoning_tokens : 0,
+          total_tokens: usage.total_tokens || 0,
+          model: model || '',
+          finish_reason: reason || 'stop',
+          elapsed_ms: Date.now() - streamStartTime,
+        };
+      };
+
       if (clientClosed || res.writableEnded || res.destroyed) {
         ended = true;
-        await releaseLease();
+        await releaseLease(prepareUsageData());
         return true;
       }
       deltaCoalescer.flush();
@@ -236,25 +251,26 @@ async function handleVercelStream(req, res, rawBody, payload) {
         ended = true;
         const detail = upstreamEmptyOutputDetail(reason === 'content_filter', outputText, thinkingText);
         sendFailedChunk(res, detail.status, detail.message, detail.code);
-        await releaseLease();
+        await releaseLease(prepareUsageData());
         if (!res.writableEnded && !res.destroyed) {
           res.end();
         }
         return true;
       }
       ended = true;
+      const finalUsage = buildUsage(usagePrompt, thinkingText, outputText);
       sendFrame({
         id: responseID,
         object: 'chat.completion.chunk',
         created,
         model,
         choices: [{ delta: {}, index: 0, finish_reason: reason }],
-        usage: buildUsage(usagePrompt, thinkingText, outputText),
+        usage: finalUsage,
       });
       if (!res.writableEnded && !res.destroyed) {
         res.write('data: [DONE]\n\n');
       }
-      await releaseLease();
+      await releaseLease(prepareUsageData());
       if (!res.writableEnded && !res.destroyed) {
         res.end();
       }
@@ -478,7 +494,8 @@ async function handleVercelStream(req, res, rawBody, payload) {
   } finally {
     req.removeListener('aborted', onReqAborted);
     res.removeListener('close', onResClose);
-    await releaseLease();
+    // Fallback release if not already released inside finish
+    await releaseLease({ finish_reason: 'abort', elapsed_ms: 0, model: model || '' });
   }
 }
 
