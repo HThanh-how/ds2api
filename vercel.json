@@ -122,12 +122,6 @@
       "destination": "/api/index"
     }
   ],
-  "crons": [
-    {
-      "path": "/admin/monitor/health-check",
-      "schedule": "0 * * * *"
-    }
-  ],
   "headers": [
     {
       "source": "/admin/assets/(.*)",
