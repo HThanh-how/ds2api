@@ -1,6 +1,7 @@
 package usagelog
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -96,6 +97,7 @@ type Store struct {
 	entries  []Entry
 	path     string
 	maxLimit int
+	turso    *TursoClient
 }
 
 var defaultPricing = map[string]struct{ input, output float64 }{
@@ -116,6 +118,20 @@ func InitStore(path string, maxLimit int) *Store {
 	s := &Store{path: strings.TrimSpace(path), maxLimit: maxLimit}
 	s.load()
 	globalStore = s
+	return s
+}
+
+func InitStoreWithTurso(path string, maxLimit int, tursoURL, tursoToken string) *Store {
+	s := InitStore(path, maxLimit)
+	if tursoURL != "" && tursoToken != "" {
+		s.turso = NewTursoClient(tursoURL, tursoToken)
+		if err := s.turso.EnsureTable(context.Background()); err != nil {
+			config.Logger.Warn("[usage_log] turso init failed, falling back to file-only", "error", err)
+			s.turso = nil
+		} else {
+			config.Logger.Info("[usage_log] turso connected")
+		}
+	}
 	return s
 }
 
@@ -159,6 +175,7 @@ func (s *Store) Log(params LogParams) {
 	}
 	s.mu.Unlock()
 	go s.saveAsync()
+	go s.writeTursoAsync(entry)
 }
 
 func (s *Store) Query(params QueryParams) ([]Entry, int) {
@@ -370,6 +387,24 @@ func estimateCost(model string, promptTokens, outputTokens int) (float64, float6
 	inputCost := float64(promptTokens) / 1_000_000 * pricing.input
 	outputCost := float64(outputTokens) / 1_000_000 * pricing.output
 	return inputCost, outputCost
+}
+
+func (s *Store) writeTursoAsync(entry Entry) {
+	if s.turso == nil {
+		return
+	}
+	sql := `INSERT INTO usage_log (id,created_at,caller_id,account_id,surface,model,stream,status_code,elapsed_ms,prompt_tokens,output_tokens,reasoning_tokens,total_tokens,input_cost,output_cost,total_cost,retry_count,finish_reason,error_code,user_input_preview) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+	err := s.turso.Execute(sql, entry.ID, entry.CreatedAt, entry.CallerID, entry.AccountID, entry.Surface, entry.Model, btoi(entry.Stream), entry.StatusCode, entry.ElapsedMs, entry.PromptTokens, entry.OutputTokens, entry.ReasoningTokens, entry.TotalTokens, entry.InputCost, entry.OutputCost, entry.TotalCost, entry.RetryCount, entry.FinishReason, entry.ErrorCode, entry.UserInputPreview)
+	if err != nil {
+		config.Logger.Warn("[usage_log] turso write failed", "error", err)
+	}
+}
+
+func btoi(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 func truncateString(s string, maxLen int) string {

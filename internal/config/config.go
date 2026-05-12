@@ -21,6 +21,7 @@ type Config struct {
 	CurrentInputFile  CurrentInputFileConfig  `json:"current_input_file,omitempty"`
 	ThinkingInjection ThinkingInjectionConfig `json:"thinking_injection,omitempty"`
 	Monitor           MonitorConfig           `json:"monitor,omitempty"`
+	Turso             TursoConfig             `json:"turso,omitempty"`
 	Vercel            VercelConfig            `json:"vercel,omitempty"`
 	VercelSyncHash    string                  `json:"_vercel_sync_hash,omitempty"`
 	VercelSyncTime    int64                   `json:"_vercel_sync_time,omitempty"`
@@ -191,6 +192,12 @@ func NormalizeVercelConfig(v VercelConfig) VercelConfig {
 		ProjectID: strings.TrimSpace(v.ProjectID),
 		TeamID:    strings.TrimSpace(v.TeamID),
 	}
+}
+
+type TursoConfig struct {
+	Enabled bool   `json:"enabled"`
+	URL     string `json:"url,omitempty"`
+	Token   string `json:"token,omitempty"`
 }
 
 func (c *Config) ClearVercelCredentials() {

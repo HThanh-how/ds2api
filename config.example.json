@@ -108,6 +108,11 @@
         "content_filter_block": true,
         "token_refresh_failure": true
       }
+    },
+    "turso": {
+      "enabled": false,
+      "url": "",
+      "token": ""
     }
   }
 }

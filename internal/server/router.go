@@ -63,7 +63,7 @@ func NewApp() (*App, error) {
 	if err := chatHistoryStore.Err(); err != nil {
 		config.Logger.Warn("[chat_history] unavailable", "path", chatHistoryStore.Path(), "error", err)
 	}
-	usagelog.InitStore(config.UsageLogPath(), 5000)
+	usagelog.InitStoreWithTurso(config.UsageLogPath(), 5000, store.TursoConfig().URL, store.TursoConfig().Token)
 
 	modelsHandler := &shared.ModelsHandler{Store: store}
 	chatHandler := &chat.Handler{Store: store, Auth: resolver, DS: dsClient, ChatHistory: chatHistoryStore}

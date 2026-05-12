@@ -203,3 +203,9 @@ func (s *Store) MonitorConfig() MonitorConfig {
 	defer s.mu.RUnlock()
 	return s.cfg.Monitor
 }
+
+func (s *Store) TursoConfig() TursoConfig {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.cfg.Turso
+}
