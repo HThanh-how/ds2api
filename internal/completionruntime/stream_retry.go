@@ -13,6 +13,7 @@ import (
 	"ds2api/internal/httpapi/openai/shared"
 	"ds2api/internal/monitor"
 	"ds2api/internal/promptcompat"
+	"ds2api/internal/usagelog"
 )
 
 type StreamRetryOptions struct {
@@ -69,6 +70,7 @@ func ExecuteStreamWithRetry(ctx context.Context, ds DeepSeekCaller, a *auth.Requ
 		}
 		if !retryable || !opts.RetryEnabled {
 			monitor.OnRequestComplete(surface, opts.Request.ResponseModel, 200, 0, 0, 0, 0, attempts)
+			logStreamUsage(a, opts, attempts, 200)
 			if hooks.Finalize != nil {
 				hooks.Finalize(attempts)
 			}
@@ -100,6 +102,7 @@ func ExecuteStreamWithRetry(ctx context.Context, ds DeepSeekCaller, a *auth.Requ
 				}
 			}
 			monitor.OnRequestComplete(surface, opts.Request.ResponseModel, 429, 0, 0, 0, 0, attempts)
+			logStreamUsage(a, opts, attempts, 429)
 			if hooks.Finalize != nil {
 				hooks.Finalize(attempts)
 			}
@@ -182,6 +185,28 @@ func clonePayload(payload map[string]any) map[string]any {
 		clone[k] = v
 	}
 	return clone
+}
+
+func logStreamUsage(a *auth.RequestAuth, opts StreamRetryOptions, attempts int, statusCode int) {
+	store := usagelog.GlobalStore()
+	if store == nil {
+		return
+	}
+	callerID := ""
+	accountID := ""
+	if a != nil {
+		callerID = a.CallerID
+		accountID = a.AccountID
+	}
+	store.Log(usagelog.LogParams{
+		CallerID:   callerID,
+		AccountID:  accountID,
+		Surface:    opts.Surface,
+		Model:      opts.Request.ResponseModel,
+		Stream:     true,
+		StatusCode: statusCode,
+		RetryCount: attempts,
+	})
 }
 
 func closeRetryBody(surface string, body io.Closer) {

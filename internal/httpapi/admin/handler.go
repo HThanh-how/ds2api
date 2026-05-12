@@ -14,6 +14,7 @@ import (
 	adminrawsamples "ds2api/internal/httpapi/admin/rawsamples"
 	adminsettings "ds2api/internal/httpapi/admin/settings"
 	adminshared "ds2api/internal/httpapi/admin/shared"
+	adminusage "ds2api/internal/httpapi/admin/usage"
 	adminvercel "ds2api/internal/httpapi/admin/vercel"
 	adminversion "ds2api/internal/httpapi/admin/version"
 )
@@ -39,6 +40,7 @@ func RegisterRoutes(r chi.Router, h *Handler) {
 	devCaptureHandler := &admindevcapture.Handler{Store: deps.Store, Pool: deps.Pool, DS: deps.DS, OpenAI: deps.OpenAI, ChatHistory: deps.ChatHistory}
 	versionHandler := &adminversion.Handler{Store: deps.Store, Pool: deps.Pool, DS: deps.DS, OpenAI: deps.OpenAI, ChatHistory: deps.ChatHistory}
 	monitorHandler := &adminmonitor.Handler{Store: deps.Store}
+	usageHandler := &adminusage.Handler{}
 
 	adminauth.RegisterPublicRoutes(r, authHandler)
 	r.Group(func(pr chi.Router) {
@@ -54,6 +56,7 @@ func RegisterRoutes(r chi.Router, h *Handler) {
 		adminhistory.RegisterRoutes(pr, historyHandler)
 		adminversion.RegisterRoutes(pr, versionHandler)
 		adminmonitor.RegisterRoutes(pr, monitorHandler)
+		adminusage.RegisterRoutes(pr, usageHandler)
 	})
 }
 

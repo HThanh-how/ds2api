@@ -31,6 +31,7 @@ import (
 	"ds2api/internal/httpapi/openai/shared"
 	"ds2api/internal/httpapi/requestbody"
 	"ds2api/internal/monitor"
+	"ds2api/internal/usagelog"
 	"ds2api/internal/webui"
 )
 
@@ -62,6 +63,7 @@ func NewApp() (*App, error) {
 	if err := chatHistoryStore.Err(); err != nil {
 		config.Logger.Warn("[chat_history] unavailable", "path", chatHistoryStore.Path(), "error", err)
 	}
+	usagelog.InitStore(config.UsageLogPath(), 5000)
 
 	modelsHandler := &shared.ModelsHandler{Store: store}
 	chatHandler := &chat.Handler{Store: store, Auth: resolver, DS: dsClient, ChatHistory: chatHistoryStore}

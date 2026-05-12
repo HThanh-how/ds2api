@@ -16,6 +16,7 @@ import (
 	"ds2api/internal/monitor"
 	"ds2api/internal/promptcompat"
 	"ds2api/internal/sse"
+	"ds2api/internal/usagelog"
 )
 
 type DeepSeekCaller interface {
@@ -183,6 +184,7 @@ func ExecuteNonStreamStartedWithRetry(ctx context.Context, ds DeepSeekCaller, a 
 				monitor.OnRequestComplete(stdReq.Surface, opts.Model, 200, 0,
 					turn.Usage.InputTokens, turn.Usage.OutputTokens, turn.Usage.ReasoningTokens, attempts)
 			}
+			logUsage(a, opts, turn, attempts)
 			return NonStreamResult{SessionID: sessionID, Payload: payload, Turn: turn, Attempts: attempts}, turn.Error
 		}
 
@@ -287,6 +289,36 @@ func authOutputError(a *auth.RequestAuth) *assistantturn.OutputError {
 		return &assistantturn.OutputError{Status: http.StatusUnauthorized, Message: "Account token is invalid. Please re-login the account in admin.", Code: "error"}
 	}
 	return &assistantturn.OutputError{Status: http.StatusUnauthorized, Message: "Invalid token. If this should be a DS2API key, add it to config.keys first.", Code: "error"}
+}
+
+func logUsage(a *auth.RequestAuth, opts Options, turn assistantturn.Turn, attempts int) {
+	store := usagelog.GlobalStore()
+	if store == nil {
+		return
+	}
+	callerID := ""
+	accountID := ""
+	if a != nil {
+		callerID = a.CallerID
+		accountID = a.AccountID
+	}
+	statusCode := 200
+	if turn.Error != nil {
+		statusCode = turn.Error.Status
+	}
+	store.Log(usagelog.LogParams{
+		CallerID:        callerID,
+		AccountID:       accountID,
+		Surface:         opts.Surface,
+		Model:           opts.Model,
+		Stream:          false,
+		StatusCode:      statusCode,
+		PromptTokens:    turn.Usage.InputTokens,
+		OutputTokens:    turn.Usage.OutputTokens,
+		ReasoningTokens: turn.Usage.ReasoningTokens,
+		RetryCount:      attempts,
+		FinishReason:    string(turn.StopReason),
+	})
 }
 
 func Errorf(status int, format string, args ...any) *assistantturn.OutputError {

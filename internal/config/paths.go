@@ -66,6 +66,13 @@ func ChatHistoryPath() string {
 	return ResolvePath("DS2API_CHAT_HISTORY_PATH", "data/chat_history.json")
 }
 
+func UsageLogPath() string {
+	if IsVercel() && strings.TrimSpace(os.Getenv("DS2API_USAGE_LOG_PATH")) == "" {
+		return "/tmp/usage_log.json"
+	}
+	return ResolvePath("DS2API_USAGE_LOG_PATH", "data/usage_log.json")
+}
+
 func StaticAdminDir() string {
 	return ResolvePath("DS2API_STATIC_ADMIN_DIR", "static/admin")
 }
