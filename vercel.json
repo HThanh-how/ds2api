@@ -125,7 +125,7 @@
   "crons": [
     {
       "path": "/admin/monitor/health-check",
-      "schedule": "* * * * *"
+      "schedule": "0 * * * *"
     }
   ],
   "headers": [
