@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -182,6 +183,9 @@ func (s *Store) Query(params QueryParams) ([]Entry, int) {
 	if s == nil {
 		return nil, 0
 	}
+	if s.turso != nil {
+		return s.queryTurso(params)
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	filtered := make([]Entry, 0, len(s.entries))
@@ -228,6 +232,9 @@ func (s *Store) Summary(from, to int64) ([]Summary, error) {
 	if s == nil {
 		return nil, errors.New("usage log store not initialized")
 	}
+	if s.turso != nil {
+		return s.summaryTurso(from, to)
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	hourMap := map[string]*Summary{}
@@ -266,6 +273,9 @@ func (s *Store) Summary(from, to int64) ([]Summary, error) {
 func (s *Store) CallerSummary(from, to int64) ([]CallerSummary, error) {
 	if s == nil {
 		return nil, errors.New("usage log store not initialized")
+	}
+	if s.turso != nil {
+		return s.callerSummaryTurso(from, to)
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -319,6 +329,9 @@ func (s *Store) Clear() {
 	if s == nil {
 		return
 	}
+	if s.turso != nil {
+		_ = s.turso.Execute("DELETE FROM usage_log")
+	}
 	s.mu.Lock()
 	s.entries = nil
 	s.mu.Unlock()
@@ -327,6 +340,13 @@ func (s *Store) Clear() {
 
 func (s *Store) EntriesCount() int {
 	if s == nil {
+		return 0
+	}
+	if s.turso != nil {
+		_, rows, err := s.turso.Query("SELECT count(*) FROM usage_log")
+		if err == nil && len(rows) > 0 && len(rows[0]) > 0 {
+			return parseInt(rows[0][0])
+		}
 		return 0
 	}
 	s.mu.RLock()
@@ -412,4 +432,206 @@ func truncateString(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen-3] + "..."
+}
+
+func (s *Store) queryTurso(params QueryParams) ([]Entry, int) {
+	where := []string{"1=1"}
+	var args []any
+	if params.From > 0 {
+		where = append(where, "created_at >= ?")
+		args = append(args, params.From)
+	}
+	if params.To > 0 {
+		where = append(where, "created_at <= ?")
+		args = append(args, params.To)
+	}
+	if params.CallerID != "" {
+		where = append(where, "caller_id = ?")
+		args = append(args, params.CallerID)
+	}
+	if params.Model != "" {
+		where = append(where, "model LIKE ?")
+		args = append(args, "%"+params.Model+"%")
+	}
+	if params.Surface != "" {
+		where = append(where, "surface = ?")
+		args = append(args, params.Surface)
+	}
+	whereClause := strings.Join(where, " AND ")
+
+	countQuery := "SELECT count(*) FROM usage_log WHERE " + whereClause
+	_, countRows, err := s.turso.Query(countQuery, args...)
+	total := 0
+	if err == nil && len(countRows) > 0 && len(countRows[0]) > 0 {
+		total = parseInt(countRows[0][0])
+	}
+
+	limit := params.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	page := params.Page
+	if page <= 0 {
+		page = 1
+	}
+	offset := (page - 1) * limit
+
+	dataQuery := "SELECT id, created_at, caller_id, account_id, surface, model, stream, status_code, elapsed_ms, prompt_tokens, output_tokens, reasoning_tokens, total_tokens, input_cost, output_cost, total_cost, retry_count, finish_reason, error_code, user_input_preview FROM usage_log WHERE " + whereClause + " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+	args = append(args, limit, offset)
+	_, rows, err := s.turso.Query(dataQuery, args...)
+	if err != nil {
+		config.Logger.Warn("[usage_log] turso query failed", "error", err)
+		return nil, 0
+	}
+
+	entries := make([]Entry, 0, len(rows))
+	for _, row := range rows {
+		if len(row) < 20 {
+			continue
+		}
+		entries = append(entries, Entry{
+			ID:               row[0],
+			CreatedAt:        parseInt64(row[1]),
+			CallerID:         row[2],
+			AccountID:        row[3],
+			Surface:          row[4],
+			Model:            row[5],
+			Stream:           row[6] == "1",
+			StatusCode:       parseInt(row[7]),
+			ElapsedMs:        parseInt64(row[8]),
+			PromptTokens:     parseInt(row[9]),
+			OutputTokens:     parseInt(row[10]),
+			ReasoningTokens:  parseInt(row[11]),
+			TotalTokens:      parseInt(row[12]),
+			InputCost:        parseFloat(row[13]),
+			OutputCost:       parseFloat(row[14]),
+			TotalCost:        parseFloat(row[15]),
+			RetryCount:       parseInt(row[16]),
+			FinishReason:     row[17],
+			ErrorCode:        row[18],
+			UserInputPreview: row[19],
+		})
+	}
+	return entries, total
+}
+
+func (s *Store) summaryTurso(from, to int64) ([]Summary, error) {
+	where := []string{"1=1"}
+	var args []any
+	if from > 0 {
+		where = append(where, "created_at >= ?")
+		args = append(args, from)
+	}
+	if to > 0 {
+		where = append(where, "created_at <= ?")
+		args = append(args, to)
+	}
+	whereClause := strings.Join(where, " AND ")
+
+	query := `SELECT 
+		strftime('%Y-%m-%dT%H:00', datetime(created_at/1000, 'unixepoch')) as hour,
+		count(*) as requests,
+		sum(prompt_tokens) as prompt_tokens,
+		sum(output_tokens) as output_tokens,
+		sum(total_tokens) as total_tokens,
+		sum(total_cost) as total_cost,
+		sum(case when status_code >= 400 then 1 else 0 end) as errors,
+		avg(elapsed_ms) as avg_latency
+	FROM usage_log 
+	WHERE ` + whereClause + ` 
+	GROUP BY hour 
+	ORDER BY hour ASC`
+
+	_, rows, err := s.turso.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+
+	summaries := make([]Summary, 0, len(rows))
+	for _, row := range rows {
+		if len(row) < 8 {
+			continue
+		}
+		summaries = append(summaries, Summary{
+			Hour:         row[0],
+			Requests:     parseInt(row[1]),
+			PromptTokens: parseInt(row[2]),
+			OutputTokens: parseInt(row[3]),
+			TotalTokens:  parseInt(row[4]),
+			TotalCost:    parseFloat(row[5]),
+			Errors:       parseInt(row[6]),
+			AvgLatencyMs: parseInt64(row[7]), 
+		})
+	}
+	return summaries, nil
+}
+
+func (s *Store) callerSummaryTurso(from, to int64) ([]CallerSummary, error) {
+	where := []string{"1=1"}
+	var args []any
+	if from > 0 {
+		where = append(where, "created_at >= ?")
+		args = append(args, from)
+	}
+	if to > 0 {
+		where = append(where, "created_at <= ?")
+		args = append(args, to)
+	}
+	whereClause := strings.Join(where, " AND ")
+
+	query := `SELECT 
+		caller_id,
+		count(*) as requests,
+		sum(prompt_tokens) as prompt_tokens,
+		sum(output_tokens) as output_tokens,
+		sum(total_tokens) as total_tokens,
+		sum(total_cost) as total_cost,
+		sum(case when status_code >= 400 then 1 else 0 end) as errors,
+		(SELECT model FROM usage_log u2 WHERE u2.caller_id = usage_log.caller_id GROUP BY model ORDER BY count(*) DESC LIMIT 1) as top_model
+	FROM usage_log 
+	WHERE ` + whereClause + ` 
+	GROUP BY caller_id 
+	ORDER BY requests DESC`
+
+	_, rows, err := s.turso.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+
+	summaries := make([]CallerSummary, 0, len(rows))
+	for _, row := range rows {
+		if len(row) < 8 {
+			continue
+		}
+		summaries = append(summaries, CallerSummary{
+			CallerID:     row[0],
+			Requests:     parseInt(row[1]),
+			PromptTokens: parseInt(row[2]),
+			OutputTokens: parseInt(row[3]),
+			TotalTokens:  parseInt(row[4]),
+			TotalCost:    parseFloat(row[5]),
+			Errors:       parseInt(row[6]),
+			TopModel:     row[7],
+		})
+	}
+	return summaries, nil
+}
+
+func parseFloat(s string) float64 {
+	f, _ := strconv.ParseFloat(s, 64)
+	return f
+}
+
+func parseInt(s string) int {
+	i, _ := strconv.Atoi(s)
+	return i
+}
+
+func parseInt64(s string) int64 {
+	f, err := strconv.ParseFloat(s, 64)
+	if err == nil {
+		return int64(f)
+	}
+	i, _ := strconv.ParseInt(s, 10, 64)
+	return i
 }
