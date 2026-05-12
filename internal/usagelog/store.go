@@ -253,8 +253,8 @@ func (s *Store) Log(params LogParams) {
 		s.entries = s.entries[len(s.entries)-s.maxLimit:]
 	}
 	s.mu.Unlock()
-	go s.saveAsync()
-	go s.writeTursoAsync(entry)
+	s.save()
+	s.writeTurso(entry)
 }
 
 func (s *Store) Query(params QueryParams) ([]Entry, int) {
@@ -437,7 +437,7 @@ func (s *Store) Clear() {
 	s.mu.Lock()
 	s.entries = nil
 	s.mu.Unlock()
-	go s.saveAsync()
+	s.save()
 }
 
 func (s *Store) EntriesCount() int {
@@ -476,7 +476,7 @@ func (s *Store) load() {
 	s.mu.Unlock()
 }
 
-func (s *Store) saveAsync() {
+func (s *Store) save() {
 	if s.path == "" {
 		return
 	}
@@ -511,7 +511,7 @@ func estimateCost(model string, promptTokens, outputTokens int) (float64, float6
 	return inputCost, outputCost
 }
 
-func (s *Store) writeTursoAsync(entry Entry) {
+func (s *Store) writeTurso(entry Entry) {
 	if s.turso == nil {
 		return
 	}
