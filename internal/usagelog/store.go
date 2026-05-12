@@ -99,6 +99,7 @@ type Store struct {
 	path     string
 	maxLimit int
 	turso    *TursoClient
+	cache    sync.Map
 }
 
 var defaultPricing = map[string]struct{ input, output float64 }{
@@ -134,6 +135,83 @@ func InitStoreWithTurso(path string, maxLimit int, tursoURL, tursoToken string) 
 		}
 	}
 	return s
+}
+
+type swrCacheItem struct {
+	mu         sync.RWMutex
+	data       any
+	total      int
+	updatedAt  time.Time
+	isFetching bool
+}
+
+func (s *Store) getSWR(key string, fetchFn func() (any, int, error)) (any, int, error) {
+	v, _ := s.cache.LoadOrStore(key, &swrCacheItem{})
+	item := v.(*swrCacheItem)
+
+	item.mu.RLock()
+	data := item.data
+	total := item.total
+	updatedAt := item.updatedAt
+	isFetching := item.isFetching
+	item.mu.RUnlock()
+
+	now := time.Now()
+
+	// 1. FRESH: < 3s (Do not fetch)
+	if !updatedAt.IsZero() && now.Sub(updatedAt) < 3*time.Second {
+		return data, total, nil
+	}
+
+	// 2. STALE: >= 3s and < 30m (Return stale immediately, fetch in background)
+	if !updatedAt.IsZero() && now.Sub(updatedAt) < 30*time.Minute {
+		if !isFetching {
+			item.mu.Lock()
+			if !item.isFetching {
+				item.isFetching = true
+				go func() {
+					defer func() {
+						item.mu.Lock()
+						item.isFetching = false
+						item.mu.Unlock()
+					}()
+					newData, newTotal, err := fetchFn()
+					if err == nil {
+						item.mu.Lock()
+						item.data = newData
+						item.total = newTotal
+						item.updatedAt = time.Now()
+						item.mu.Unlock()
+					}
+				}()
+			}
+			item.mu.Unlock()
+		}
+		return data, total, nil
+	}
+
+	// 3. EXPIRED or NO DATA: Synchronous fetch
+	item.mu.Lock()
+	if item.isFetching && !updatedAt.IsZero() {
+		// Another thread is fetching, just return old data to avoid blocking
+		item.mu.Unlock()
+		return data, total, nil
+	}
+	item.isFetching = true
+	item.mu.Unlock()
+
+	newData, newTotal, err := fetchFn()
+
+	item.mu.Lock()
+	item.isFetching = false
+	if err == nil {
+		item.data = newData
+		item.total = newTotal
+		item.updatedAt = time.Now()
+	}
+	item.mu.Unlock()
+
+	return newData, newTotal, err
 }
 
 func GlobalStore() *Store {
@@ -184,7 +262,15 @@ func (s *Store) Query(params QueryParams) ([]Entry, int) {
 		return nil, 0
 	}
 	if s.turso != nil {
-		return s.queryTurso(params)
+		key := fmt.Sprintf("query:%d:%d:%s:%s:%s:%d:%d", params.From, params.To, params.CallerID, params.Model, params.Surface, params.Page, params.Limit)
+		data, total, _ := s.getSWR(key, func() (any, int, error) {
+			entries, t := s.queryTurso(params)
+			return entries, t, nil
+		})
+		if data == nil {
+			return nil, 0
+		}
+		return data.([]Entry), total
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -233,7 +319,15 @@ func (s *Store) Summary(from, to int64) ([]Summary, error) {
 		return nil, errors.New("usage log store not initialized")
 	}
 	if s.turso != nil {
-		return s.summaryTurso(from, to)
+		key := fmt.Sprintf("summary:%d:%d", from, to)
+		data, _, err := s.getSWR(key, func() (any, int, error) {
+			res, e := s.summaryTurso(from, to)
+			return res, 0, e
+		})
+		if err != nil || data == nil {
+			return nil, err
+		}
+		return data.([]Summary), nil
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -275,7 +369,15 @@ func (s *Store) CallerSummary(from, to int64) ([]CallerSummary, error) {
 		return nil, errors.New("usage log store not initialized")
 	}
 	if s.turso != nil {
-		return s.callerSummaryTurso(from, to)
+		key := fmt.Sprintf("caller:%d:%d", from, to)
+		data, _, err := s.getSWR(key, func() (any, int, error) {
+			res, e := s.callerSummaryTurso(from, to)
+			return res, 0, e
+		})
+		if err != nil || data == nil {
+			return nil, err
+		}
+		return data.([]CallerSummary), nil
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
