@@ -38,38 +38,10 @@
     }
   ],
   "model_aliases": {
-    "gpt-5": "deepseek-v4-pro",
-    "gpt-5-turbo": "deepseek-v4-pro",
-    "gpt-5.3-codex": "deepseek-v4-pro",
-    "gpt-5.5": "deepseek-v4-flash",
-    "gpt-4": "deepseek-v4-pro",
-    "gpt-4-turbo": "deepseek-v4-pro",
     "gpt-4o": "deepseek-v4-flash",
-    "gpt-4o-mini": "deepseek-v4-flash",
-    "gpt-3.5-turbo": "deepseek-v4-flash",
-    "claude-3-opus": "deepseek-v4-pro",
-    "claude-3-sonnet": "deepseek-v4-flash",
-    "claude-3-haiku": "deepseek-v4-flash",
-    "claude-3.5-sonnet": "deepseek-v4-flash",
-    "claude-3.5-haiku": "deepseek-v4-flash",
-    "claude-3.7-sonnet": "deepseek-v4-pro",
-    "claude-4-sonnet": "deepseek-v4-pro",
-    "claude-opus-4-6": "deepseek-v4-pro",
-    "claude-opus-4-7": "deepseek-v4-pro",
-    "o1": "deepseek-v4-pro",
-    "o1-preview": "deepseek-v4-pro",
-    "o1-mini": "deepseek-v4-flash",
-    "o3": "deepseek-v4-pro",
-    "o3-mini": "deepseek-v4-flash",
-    "gemini-1.5-pro": "deepseek-v4-pro",
-    "gemini-1.5-flash": "deepseek-v4-flash",
-    "gemini-2.0-flash": "deepseek-v4-flash",
-    "gemini-2.5-pro": "deepseek-v4-pro",
-    "cursor-small": "deepseek-v4-flash",
-    "cursor-fast": "deepseek-v4-flash",
-    "deepseek-chat": "deepseek-v4-flash",
-    "deepseek-reasoner": "deepseek-v4-pro",
-    "deepseek-coder": "deepseek-v4-pro"
+    "gpt-5.5": "deepseek-v4-flash",
+    "gpt-5.3-codex": "deepseek-v4-pro",
+    "o3": "deepseek-v4-pro"
   },
   "responses": {
     "store_ttl_seconds": 900
@@ -96,5 +68,46 @@
   },
   "auto_delete": {
     "mode": "none"
+  },
+  "monitor": {
+    "metrics": {
+      "enabled": true,
+      "path": "/metrics"
+    },
+    "alerting": {
+      "enabled": true,
+      "rate_limit_seconds": 60,
+      "channels": {
+        "discord": {
+          "enabled": false,
+          "webhook_url": ""
+        },
+        "slack": {
+          "enabled": false,
+          "webhook_url": ""
+        },
+        "telegram": {
+          "enabled": false,
+          "bot_token": "",
+          "chat_id": ""
+        },
+        "custom": {
+          "enabled": false,
+          "url": "",
+          "headers": {}
+        }
+      },
+      "triggers": {
+        "account_all_down": true,
+        "high_error_rate": true,
+        "high_error_rate_threshold": 0.30,
+        "consecutive_upstream_failures": true,
+        "consecutive_upstream_threshold": 10,
+        "session_creation_failure": true,
+        "pow_failure": true,
+        "content_filter_block": true,
+        "token_refresh_failure": true
+      }
+    }
   }
 }

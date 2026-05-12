@@ -12,6 +12,7 @@ import {
     Users,
     Globe,
     History,
+    Activity,
     Loader2
 } from 'lucide-react'
 import clsx from 'clsx'
@@ -26,6 +27,7 @@ const BatchImport = lazy(() => import('../components/BatchImport'))
 const VercelSyncContainer = lazy(() => import('../features/vercel/VercelSyncContainer'))
 const SettingsContainer = lazy(() => import('../features/settings/SettingsContainer'))
 const ProxyManagerContainer = lazy(() => import('../features/proxy/ProxyManagerContainer'))
+const UsageContainer = lazy(() => import('../features/usage/UsageContainer'))
 
 function TabLoadingFallback({ label }) {
     return (
@@ -51,6 +53,7 @@ export default function DashboardShell({ token, onLogout, config, fetchConfig, s
         { id: 'history', label: t('nav.history.label'), icon: History, description: t('nav.history.desc') },
         { id: 'import', label: t('nav.import.label'), icon: Upload, description: t('nav.import.desc') },
         { id: 'vercel', label: t('nav.vercel.label'), icon: Cloud, description: t('nav.vercel.desc') },
+        { id: 'usage', label: t('nav.usage.label'), icon: Activity, description: t('nav.usage.desc') },
         { id: 'settings', label: t('nav.settings.label'), icon: SettingsIcon, description: t('nav.settings.desc') },
     ]
 
@@ -121,6 +124,8 @@ export default function DashboardShell({ token, onLogout, config, fetchConfig, s
                 return <BatchImport onRefresh={fetchConfig} onMessage={showMessage} authFetch={authFetch} />
             case 'vercel':
                 return <VercelSyncContainer onMessage={showMessage} authFetch={authFetch} isVercel={isVercel} config={config} />
+            case 'usage':
+                return <UsageContainer authFetch={authFetch} onMessage={showMessage} />
             case 'settings':
                 return <SettingsContainer onRefresh={fetchConfig} onMessage={showMessage} authFetch={authFetch} onForceLogout={onForceLogout} isVercel={isVercel} />
             default:
@@ -259,7 +264,7 @@ export default function DashboardShell({ token, onLogout, config, fetchConfig, s
                                 message.type === 'error' ? "bg-destructive/10 border-destructive/20 text-destructive" :
                                     "bg-emerald-500/10 border-emerald-500/20 text-emerald-500"
                             )}>
-                                {message.type === 'error' ? <X className="w-5 h-5" /> : <div className="w-5 h-5 rounded-full border-2 border-emerald-500 flex items-center justify-center text-[10px]">✓</div>}
+                                {message.type === 'error' ? <X className="w-5 h-5" /> : <div className="w-5 h-5 rounded-full border-2 border-emerald-500 flex items-center justify-center text-[10px]">Ôťô</div>}
                                 {message.text}
                             </div>
                         )}

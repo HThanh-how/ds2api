@@ -30,6 +30,7 @@ import (
 	"ds2api/internal/httpapi/openai/responses"
 	"ds2api/internal/httpapi/openai/shared"
 	"ds2api/internal/httpapi/requestbody"
+	"ds2api/internal/monitor"
 	"ds2api/internal/webui"
 )
 
@@ -96,6 +97,10 @@ func NewApp() (*App, error) {
 	r.Head("/healthz", healthzHandler)
 	r.Get("/readyz", readyzHandler)
 	r.Head("/readyz", readyzHandler)
+	r.Get("/metrics", monitor.MetricsHandler())
+	r.Head("/metrics", monitor.MetricsHandler())
+	// Initialize the monitor alerter.
+	monitor.SetAlerter(monitor.NewAlerter(store))
 	r.Get("/v1/models", modelsHandler.ListModels)
 	r.Get("/v1/models/{model_id}", modelsHandler.GetModel)
 	r.Post("/v1/chat/completions", chatHandler.ChatCompletions)

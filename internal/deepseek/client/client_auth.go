@@ -11,6 +11,7 @@ import (
 
 	"ds2api/internal/auth"
 	"ds2api/internal/config"
+	"ds2api/internal/monitor"
 )
 
 func (c *Client) Login(ctx context.Context, acc config.Account) (string, error) {
@@ -88,6 +89,7 @@ func (c *Client) CreateSession(ctx context.Context, a *auth.RequestAuth, maxAtte
 		}
 		attempts++
 	}
+	monitor.OnSessionCreationFailure(a.AccountID, "create session failed after max attempts")
 	return "", errors.New("create session failed")
 }
 
@@ -153,8 +155,10 @@ func (c *Client) GetPowForTarget(ctx context.Context, a *auth.RequestAuth, targe
 		attempts++
 	}
 	if lastFailureKind != FailureUnknown {
+		monitor.OnPowFailure(a.AccountID)
 		return "", &RequestFailure{Op: "get pow", Kind: lastFailureKind, Message: lastFailureMessage}
 	}
+	monitor.OnPowFailure(a.AccountID)
 	return "", errors.New("get pow failed")
 }
 

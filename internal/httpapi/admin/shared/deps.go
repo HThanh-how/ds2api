@@ -38,6 +38,9 @@ type ConfigStore interface {
 	ThinkingInjectionEnabled() bool
 	ThinkingInjectionPrompt() string
 	AutoDeleteSessions() bool
+	MonitorConfig() config.MonitorConfig
+	MonitorMetrics() config.MetricsConfig
+	MonitorAlerting() config.AlertingConfig
 }
 
 type PoolController interface {

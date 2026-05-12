@@ -57,10 +57,15 @@ func (p *Pool) acquireLocked(target string, exclude map[string]bool) (config.Acc
 		}
 		p.inUse[target]++
 		p.bumpQueue(target)
+		p.emitPoolMetricsLocked()
 		return acc, true
 	}
 
-	return p.tryAcquire(exclude)
+	acc, ok := p.tryAcquire(exclude)
+	if ok {
+		p.emitPoolMetricsLocked()
+	}
+	return acc, ok
 }
 
 func (p *Pool) tryAcquire(exclude map[string]bool) (config.Account, bool) {

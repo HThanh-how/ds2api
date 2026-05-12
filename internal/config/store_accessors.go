@@ -174,3 +174,32 @@ func (s *Store) ThinkingInjectionPrompt() string {
 	defer s.mu.RUnlock()
 	return strings.TrimSpace(s.cfg.ThinkingInjection.Prompt)
 }
+
+func (s *Store) MonitorMetrics() MetricsConfig {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.cfg.Monitor.Metrics.Enabled {
+		return MetricsConfig{Enabled: false}
+	}
+	cfg := s.cfg.Monitor.Metrics
+	if cfg.Path == "" {
+		cfg.Path = "/metrics"
+	}
+	return cfg
+}
+
+func (s *Store) MonitorAlerting() AlertingConfig {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	cfg := s.cfg.Monitor.Alerting
+	if cfg.RateLimitSeconds <= 0 {
+		cfg.RateLimitSeconds = 60
+	}
+	return cfg
+}
+
+func (s *Store) MonitorConfig() MonitorConfig {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.cfg.Monitor
+}

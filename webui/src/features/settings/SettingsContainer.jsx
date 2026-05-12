@@ -9,6 +9,7 @@ import CurrentInputFileSection from './CurrentInputFileSection'
 import AutoDeleteSection from './AutoDeleteSection'
 import ModelSection from './ModelSection'
 import BackupSection from './BackupSection'
+import MonitorSettingsSection from './MonitorSettingsSection'
 
 export default function SettingsContainer({ onRefresh, onMessage, authFetch, onForceLogout, isVercel = false }) {
     const { t } = useI18n()
@@ -100,6 +101,8 @@ export default function SettingsContainer({ onRefresh, onMessage, authFetch, onF
             <AutoDeleteSection t={t} form={form} setForm={setForm} />
 
             <ModelSection t={t} form={form} setForm={setForm} />
+
+            <MonitorSettingsSection t={t} authFetch={authFetch} onMessage={onMessage} />
 
             <BackupSection
                 t={t}

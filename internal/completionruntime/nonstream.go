@@ -13,6 +13,7 @@ import (
 	dsclient "ds2api/internal/deepseek/client"
 	"ds2api/internal/httpapi/openai/history"
 	"ds2api/internal/httpapi/openai/shared"
+	"ds2api/internal/monitor"
 	"ds2api/internal/promptcompat"
 	"ds2api/internal/sse"
 )
@@ -30,6 +31,8 @@ type Options struct {
 	RetryEnabled          bool
 	RetryMaxAttempts      int
 	CurrentInputFile      history.CurrentInputConfigReader
+	Surface               string
+	Model                 string
 }
 
 type NonStreamResult struct {
@@ -88,6 +91,7 @@ func prepareCurrentInputFile(ctx context.Context, ds DeepSeekCaller, a *auth.Req
 func ExecuteNonStreamWithRetry(ctx context.Context, ds DeepSeekCaller, a *auth.RequestAuth, stdReq promptcompat.StandardRequest, opts Options) (NonStreamResult, *assistantturn.OutputError) {
 	start, startErr := StartCompletion(ctx, ds, a, stdReq, opts)
 	if startErr != nil {
+		monitor.OnRequestComplete(opts.Surface, opts.Model, startErr.Status, 0, 0, 0, 0, 0)
 		return NonStreamResult{SessionID: start.SessionID, Payload: start.Payload}, startErr
 	}
 	return ExecuteNonStreamStartedWithRetry(ctx, ds, a, start, opts)
@@ -168,8 +172,16 @@ func ExecuteNonStreamStartedWithRetry(ctx context.Context, ds DeepSeekCaller, a 
 					accumulatedThinking = ""
 					accumulatedRawThinking = ""
 					accumulatedToolDetectionThinking = ""
+					monitor.OnAccountSwitchRetry()
 					continue
 				}
+			}
+			if turn.Error != nil {
+				monitor.OnRequestComplete(stdReq.Surface, opts.Model, turn.Error.Status, 0,
+					turn.Usage.InputTokens, turn.Usage.OutputTokens, turn.Usage.ReasoningTokens, attempts)
+			} else {
+				monitor.OnRequestComplete(stdReq.Surface, opts.Model, 200, 0,
+					turn.Usage.InputTokens, turn.Usage.OutputTokens, turn.Usage.ReasoningTokens, attempts)
 			}
 			return NonStreamResult{SessionID: sessionID, Payload: payload, Turn: turn, Attempts: attempts}, turn.Error
 		}

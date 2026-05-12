@@ -12,6 +12,7 @@ import (
 
 	"ds2api/internal/account"
 	"ds2api/internal/config"
+	"ds2api/internal/monitor"
 )
 
 type ctxKey string
@@ -168,6 +169,7 @@ func (r *Resolver) RefreshToken(ctx context.Context, a *RequestAuth) bool {
 	a.Account.Token = ""
 	if err := r.loginAndPersist(ctx, a); err != nil {
 		config.Logger.Error("[refresh_token] failed", "account", a.AccountID, "error", err)
+		monitor.OnTokenRefreshFailure(a.AccountID, err.Error())
 		return false
 	}
 	return true

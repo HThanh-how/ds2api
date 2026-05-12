@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"ds2api/internal/config"
+	"ds2api/internal/monitor"
 )
 
 type Pool struct {
@@ -93,10 +94,23 @@ func (p *Pool) Release(accountID string) {
 	if count == 1 {
 		delete(p.inUse, accountID)
 		p.notifyWaiterLocked()
+		p.emitPoolMetricsLocked()
 		return
 	}
 	p.inUse[accountID] = count - 1
 	p.notifyWaiterLocked()
+	p.emitPoolMetricsLocked()
+}
+
+func (p *Pool) emitPoolMetricsLocked() {
+	inUse := p.currentInUseLocked()
+	available := 0
+	for _, id := range p.queue {
+		if p.inUse[id] < p.maxInflightPerAccount {
+			available++
+		}
+	}
+	monitor.OnAccountPoolChange(inUse, available, len(p.waiters), len(p.queue))
 }
 
 func (p *Pool) Status() map[string]any {
@@ -117,6 +131,24 @@ func (p *Pool) Status() map[string]any {
 		}
 	}
 	sort.Strings(inUseAccounts)
+	accountsDetail := make([]map[string]any, 0, len(p.queue))
+	for _, id := range p.queue {
+		acc, ok := p.store.FindAccount(id)
+		if !ok {
+			continue
+		}
+		name := acc.Name
+		if name == "" {
+			name = id
+		}
+		accountsDetail = append(accountsDetail, map[string]any{
+			"id":           id,
+			"name":         name,
+			"in_use_slots": p.inUse[id],
+			"max_slots":    p.maxInflightPerAccount,
+			"health_score": 100,
+		})
+	}
 	return map[string]any{
 		"available":                len(available),
 		"in_use":                   inUseSlots,
@@ -128,5 +160,6 @@ func (p *Pool) Status() map[string]any {
 		"recommended_concurrency":  p.recommendedConcurrency,
 		"waiting":                  len(p.waiters),
 		"max_queue_size":           p.maxQueueSize,
+		"accounts":                 accountsDetail,
 	}
 }

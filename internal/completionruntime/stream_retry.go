@@ -11,6 +11,7 @@ import (
 	"ds2api/internal/config"
 	"ds2api/internal/httpapi/openai/history"
 	"ds2api/internal/httpapi/openai/shared"
+	"ds2api/internal/monitor"
 	"ds2api/internal/promptcompat"
 )
 
@@ -67,6 +68,7 @@ func ExecuteStreamWithRetry(ctx context.Context, ds DeepSeekCaller, a *auth.Requ
 			return
 		}
 		if !retryable || !opts.RetryEnabled {
+			monitor.OnRequestComplete(surface, opts.Request.ResponseModel, 200, 0, 0, 0, 0, attempts)
 			if hooks.Finalize != nil {
 				hooks.Finalize(attempts)
 			}
@@ -93,9 +95,11 @@ func ExecuteStreamWithRetry(ctx context.Context, ds DeepSeekCaller, a *auth.Requ
 					if hooks.OnRetryPrompt != nil {
 						hooks.OnRetryPrompt(opts.UsagePrompt)
 					}
+					monitor.OnAccountSwitchRetry()
 					continue
 				}
 			}
+			monitor.OnRequestComplete(surface, opts.Request.ResponseModel, 429, 0, 0, 0, 0, attempts)
 			if hooks.Finalize != nil {
 				hooks.Finalize(attempts)
 			}

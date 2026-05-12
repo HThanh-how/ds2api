@@ -110,8 +110,22 @@
       "destination": "/admin/index.html"
     },
     {
+      "source": "/admin/monitor(.*)",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/metrics",
+      "destination": "/api/index"
+    },
+    {
       "source": "/(.*)",
       "destination": "/api/index"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/admin/monitor/health-check",
+      "schedule": "* * * * *"
     }
   ],
   "headers": [
