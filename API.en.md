@@ -83,6 +83,7 @@ Two header formats accepted:
 
 **Auth behavior**:
 
+- When Turso is configured (`turso.url` and token), configured business API keys are mirrored to Turso (hashed at rest). Membership checks **prefer** the database; on lookup errors or misses, DS2API falls back to local `config.keys` / `api_keys`. **Admins still manage keys via config file or Admin APIs**; after a successful save, the full key set is synced to Turso. Without Turso, behavior matches the previous local-only checks.
 - Token is in `config.keys` → **Managed account mode**: DS2API auto-selects an account via rotation
 - Token is not in `config.keys` → **Direct token mode**: treated as a DeepSeek token directly
 

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -8,16 +9,19 @@ import (
 	"slices"
 	"strings"
 	"sync"
+
+	"ds2api/internal/apikeydb"
 )
 
 type Store struct {
-	mu      sync.RWMutex
-	cfg     Config
-	path    string
-	fromEnv bool
-	keyMap  map[string]struct{} // O(1) API key lookup index
-	accMap  map[string]int      // O(1) account lookup: identifier -> slice index
-	accTest map[string]string   // runtime-only account test status cache
+	mu          sync.RWMutex
+	cfg         Config
+	path        string
+	fromEnv     bool
+	keyMap      map[string]struct{} // O(1) API key lookup index
+	accMap      map[string]int      // O(1) account lookup: identifier -> slice index
+	accTest     map[string]string   // runtime-only account test status cache
+	apiKeyTurso *apikeydb.Client    // optional Turso mirror for API key membership (set from router)
 }
 
 func LoadStore() *Store {
@@ -144,6 +148,22 @@ func (s *Store) Snapshot() Config {
 }
 
 func (s *Store) HasAPIKey(k string) bool {
+	k = strings.TrimSpace(k)
+	if k == "" {
+		return false
+	}
+	s.mu.RLock()
+	db := s.apiKeyTurso
+	s.mu.RUnlock()
+	if db != nil && db.Enabled() {
+		ok, err := db.HasKey(context.Background(), k)
+		if err == nil && ok {
+			return true
+		}
+		if err != nil {
+			Logger.Warn("[api_key_db] turso lookup failed, using config fallback", "error", err.Error())
+		}
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	_, ok := s.keyMap[k]
@@ -223,25 +243,40 @@ func (s *Store) UpdateAccountToken(identifier, token string) error {
 func (s *Store) Replace(cfg Config) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	prevKeys := normalizedAPIKeyRows(s.cfg)
 	cfg.NormalizeCredentials()
 	s.cfg = cfg.Clone()
 	s.rebuildIndexes()
-	return s.saveLocked()
+	if err := s.saveLocked(); err != nil {
+		return err
+	}
+	if !apiKeyRowsEqual(prevKeys, normalizedAPIKeyRows(s.cfg)) {
+		go s.pushAPIKeysToTursoAsync()
+	}
+	return nil
 }
 
 func (s *Store) Update(mutator func(*Config) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	base := s.cfg.Clone()
+	prevKeys := normalizedAPIKeyRows(base)
 	cfg := base.Clone()
 	if err := mutator(&cfg); err != nil {
 		return err
 	}
 	cfg.ReconcileCredentials(base)
 	cfg.NormalizeCredentials()
+	nextKeys := normalizedAPIKeyRows(cfg)
 	s.cfg = cfg
 	s.rebuildIndexes()
-	return s.saveLocked()
+	if err := s.saveLocked(); err != nil {
+		return err
+	}
+	if !apiKeyRowsEqual(prevKeys, nextKeys) {
+		go s.pushAPIKeysToTursoAsync()
+	}
+	return nil
 }
 
 func (s *Store) Save() error {

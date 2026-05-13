@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"ds2api/internal/account"
+	"ds2api/internal/apikeydb"
 	"ds2api/internal/auth"
 	"ds2api/internal/chathistory"
 	"ds2api/internal/config"
@@ -67,6 +68,20 @@ func NewApp() (*App, error) {
 		config.Logger.Warn("[chat_history] unavailable", "path", chatHistoryStore.Path(), "error", err)
 	}
 	tursoCfg := store.TursoConfig()
+	if kdb := apikeydb.New(tursoCfg.URL, tursoCfg.Token); kdb != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+		if err := kdb.EnsureTable(ctx); err != nil {
+			config.Logger.Warn("[api_key_db] ensure table failed", "error", err)
+		} else {
+			store.SetAPIKeyTurso(kdb)
+			if err := store.SyncAPIKeysToTursoNow(ctx); err != nil {
+				config.Logger.Warn("[api_key_db] initial sync failed", "error", err)
+			} else {
+				config.Logger.Info("[api_key_db] turso enabled; keys synced from config")
+			}
+		}
+		cancel()
+	}
 	usagelog.InitStoreWithTurso(config.UsageLogPath(), 5000, tursoCfg.URL, tursoCfg.Token)
 
 	healthTracker := health.Init(tursoCfg.URL, tursoCfg.Token)
