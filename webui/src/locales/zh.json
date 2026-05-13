@@ -113,6 +113,7 @@
                 "available": "可用",
                 "inUse": "正在使用",
                 "totalPool": "账号池总数",
+                "healthyAccounts": "健康账号",
                 "accountsUnit": "个账号",
                 "threadsUnit": "线程",
                 "apiKeysTitle": "API 密钥",

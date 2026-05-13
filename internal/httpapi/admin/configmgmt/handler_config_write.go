@@ -72,6 +72,9 @@ func (h *Handler) updateConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.Pool.Reset()
+	if h.APIKeyCache != nil {
+		h.APIKeyCache.InvalidateAllPositive()
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "message": "配置已更新"})
 }
 
@@ -98,6 +101,10 @@ func (h *Handler) addKey(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": err.Error()})
 		return
+	}
+	if h.APIKeyCache != nil {
+		h.APIKeyCache.ClearRevokedKey(key)
+		h.APIKeyCache.InvalidateOne(key)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "total_keys": len(h.Store.Snapshot().Keys)})
 }
@@ -163,6 +170,9 @@ func (h *Handler) deleteKey(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]any{"detail": err.Error()})
 		return
 	}
+	if h.APIKeyCache != nil {
+		h.APIKeyCache.RegisterRevokedKey(key)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "total_keys": len(h.Store.Snapshot().Keys)})
 }
 
@@ -223,5 +233,8 @@ func (h *Handler) batchImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.Pool.Reset()
+	if h.APIKeyCache != nil {
+		h.APIKeyCache.InvalidateAllPositive()
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "imported_keys": importedKeys, "imported_accounts": importedAccounts})
 }

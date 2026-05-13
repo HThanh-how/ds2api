@@ -37,10 +37,16 @@ type RequestAuth struct {
 
 type LoginFunc func(ctx context.Context, acc config.Account) (string, error)
 
+type LoginFailureReporter interface {
+	RecordLoginFailure(accountID string)
+}
+
 type Resolver struct {
-	Store *config.Store
-	Pool  *account.Pool
-	Login LoginFunc
+	Store             *config.Store
+	Pool              *account.Pool
+	Login             LoginFunc
+	LoginFailReporter LoginFailureReporter
+	keyCache          *APIKeyCache
 
 	mu               sync.Mutex
 	tokenRefreshedAt map[string]time.Time
@@ -55,6 +61,24 @@ func NewResolver(store *config.Store, pool *account.Pool, login LoginFunc) *Reso
 	}
 }
 
+// SetAPIKeyCache wires optional verification cache (positive TTL + revoked block).
+func (r *Resolver) SetAPIKeyCache(c *APIKeyCache) {
+	if r == nil {
+		return
+	}
+	r.keyCache = c
+}
+
+func (r *Resolver) isManagedAPIKey(raw string) (bool, error) {
+	if r == nil || r.Store == nil {
+		return false, nil
+	}
+	if r.keyCache == nil {
+		return r.Store.HasAPIKey(raw), nil
+	}
+	return r.keyCache.ManagedByConfigStore(r.Store, raw)
+}
+
 func (r *Resolver) Determine(req *http.Request) (*RequestAuth, error) {
 	callerKey := extractCallerToken(req)
 	if callerKey == "" {
@@ -62,7 +86,11 @@ func (r *Resolver) Determine(req *http.Request) (*RequestAuth, error) {
 	}
 	callerID := callerTokenID(callerKey)
 	ctx := req.Context()
-	if !r.Store.HasAPIKey(callerKey) {
+	managed, err := r.isManagedAPIKey(callerKey)
+	if err != nil {
+		return nil, err
+	}
+	if !managed {
 		return &RequestAuth{
 			UseConfigToken: false,
 			DeepSeekToken:  callerKey,
@@ -109,6 +137,9 @@ func (r *Resolver) acquireManagedRequestAuth(ctx context.Context, callerID, targ
 
 		if err := r.ensureManagedToken(ctx, a); err != nil {
 			lastEnsureErr = err
+			if r.LoginFailReporter != nil {
+				r.LoginFailReporter.RecordLoginFailure(a.AccountID)
+			}
 			tried[a.AccountID] = true
 			r.Pool.Release(a.AccountID)
 			if target != "" {
@@ -134,7 +165,11 @@ func (r *Resolver) DetermineCaller(req *http.Request) (*RequestAuth, error) {
 		resolver:       r,
 		TriedAccounts:  map[string]bool{},
 	}
-	if r == nil || r.Store == nil || !r.Store.HasAPIKey(callerKey) {
+	managed, err := r.isManagedAPIKey(callerKey)
+	if err != nil {
+		return nil, err
+	}
+	if !managed {
 		a.DeepSeekToken = callerKey
 	}
 	return a, nil
@@ -207,6 +242,9 @@ func (r *Resolver) SwitchAccount(ctx context.Context, a *RequestAuth) bool {
 		a.Account = acc
 		a.AccountID = acc.Identifier()
 		if err := r.ensureManagedToken(ctx, a); err != nil {
+			if r.LoginFailReporter != nil {
+				r.LoginFailReporter.RecordLoginFailure(a.AccountID)
+			}
 			a.TriedAccounts[a.AccountID] = true
 			r.Pool.Release(a.AccountID)
 			continue

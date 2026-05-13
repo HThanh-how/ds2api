@@ -8,8 +8,15 @@ import (
 	"ds2api/internal/monitor"
 )
 
+type HealthChecker interface {
+	IsAvailable(accountID string) bool
+	GetHealthScore(accountID string) float64
+	CooldownUntil(accountID string) int64
+}
+
 type Pool struct {
 	store                  *config.Store
+	health                 HealthChecker
 	mu                     sync.Mutex
 	queue                  []string
 	inUse                  map[string]int
@@ -18,6 +25,12 @@ type Pool struct {
 	recommendedConcurrency int
 	maxQueueSize           int
 	globalMaxInflight      int
+}
+
+func (p *Pool) SetHealthChecker(h HealthChecker) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.health = h
 }
 
 func NewPool(store *config.Store) *Pool {
@@ -141,12 +154,16 @@ func (p *Pool) Status() map[string]any {
 		if name == "" {
 			name = id
 		}
+		score := float64(100)
+		if p.health != nil {
+			score = p.health.GetHealthScore(id)
+		}
 		accountsDetail = append(accountsDetail, map[string]any{
 			"id":           id,
 			"name":         name,
 			"in_use_slots": p.inUse[id],
 			"max_slots":    p.maxInflightPerAccount,
-			"health_score": 100,
+			"health_score": score,
 		})
 	}
 	return map[string]any{

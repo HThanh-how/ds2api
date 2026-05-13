@@ -136,9 +136,19 @@ func (c *Client) UploadFile(ctx context.Context, a *auth.RequestAuth, req Upload
 			if err := c.waitForUploadedFile(ctx, a, result); err != nil {
 				return nil, err
 			}
+			if c.Health != nil {
+				c.Health.RecordSuccess(a.AccountID)
+			}
 			return result, nil
 		}
 		config.Logger.Warn("[upload_file] failed", "status", resp.StatusCode, "code", code, "biz_code", bizCode, "msg", msg, "biz_msg", bizMsg, "account", a.AccountID, "filename", filename)
+		if c.Health != nil {
+			if isMuteResponse(bizCode) {
+				c.Health.RecordMute(a.AccountID, extractMuteUntil(parsed))
+			} else {
+				c.Health.RecordUploadFailure(a.AccountID)
+			}
+		}
 		powHeader = ""
 		lastFailureMessage = failureMessage(msg, bizMsg, "upload file failed")
 		if isTokenInvalid(resp.StatusCode, code, bizCode, msg, bizMsg) || isAuthIndicativeBizFailure(msg, bizMsg) {

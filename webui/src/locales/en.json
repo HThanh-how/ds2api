@@ -113,6 +113,7 @@
         "available": "Available",
         "inUse": "In use",
         "totalPool": "Total pool",
+        "healthyAccounts": "Healthy",
         "accountsUnit": "accounts",
         "threadsUnit": "threads",
         "apiKeysTitle": "API Keys",

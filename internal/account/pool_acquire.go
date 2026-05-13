@@ -69,6 +69,13 @@ func (p *Pool) acquireLocked(target string, exclude map[string]bool) (config.Acc
 }
 
 func (p *Pool) tryAcquire(exclude map[string]bool) (config.Account, bool) {
+	if p.health == nil {
+		return p.tryAcquireRoundRobin(exclude)
+	}
+	return p.tryAcquireHealthAware(exclude)
+}
+
+func (p *Pool) tryAcquireRoundRobin(exclude map[string]bool) (config.Account, bool) {
 	for i := 0; i < len(p.queue); i++ {
 		id := p.queue[i]
 		if exclude[id] || !p.canAcquireIDLocked(id) {
@@ -83,6 +90,48 @@ func (p *Pool) tryAcquire(exclude map[string]bool) (config.Account, bool) {
 		return acc, true
 	}
 	return config.Account{}, false
+}
+
+func (p *Pool) tryAcquireHealthAware(exclude map[string]bool) (config.Account, bool) {
+	bestID := ""
+	bestScore := -1.0
+	var soonestCooldownID string
+	soonestCooldown := int64(0)
+
+	for _, id := range p.queue {
+		if exclude[id] || !p.canAcquireIDLocked(id) {
+			continue
+		}
+		if !p.health.IsAvailable(id) {
+			cd := p.health.CooldownUntil(id)
+			if soonestCooldownID == "" || (cd > 0 && cd < soonestCooldown) {
+				soonestCooldownID = id
+				soonestCooldown = cd
+			}
+			continue
+		}
+		score := p.health.GetHealthScore(id)
+		if score > bestScore {
+			bestScore = score
+			bestID = id
+		}
+	}
+
+	if bestID == "" {
+		if soonestCooldownID == "" {
+			return config.Account{}, false
+		}
+		config.Logger.Warn("[pool_health] all accounts unhealthy, fallback", "id", soonestCooldownID)
+		bestID = soonestCooldownID
+	}
+
+	acc, ok := p.store.FindAccount(bestID)
+	if !ok {
+		return config.Account{}, false
+	}
+	p.inUse[bestID]++
+	p.bumpQueue(bestID)
+	return acc, true
 }
 
 func (p *Pool) bumpQueue(accountID string) {

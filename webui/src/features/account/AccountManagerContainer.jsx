@@ -1,6 +1,7 @@
 import { useI18n } from '../../i18n'
 import { useAccountsData } from './useAccountsData'
 import { useAccountActions } from './useAccountActions'
+import { useAccountHealth } from './useAccountHealth'
 import QueueCards from './QueueCards'
 import ApiKeysPanel from './ApiKeysPanel'
 import AccountsTable from './AccountsTable'
@@ -28,6 +29,8 @@ export default function AccountManagerContainer({ config, onRefresh, onMessage, 
         searchQuery,
         handleSearchChange,
     } = useAccountsData({ apiFetch })
+
+    const { healthData } = useAccountHealth({ apiFetch })
 
     const {
         showAddKey,
@@ -99,7 +102,7 @@ export default function AccountManagerContainer({ config, onRefresh, onMessage, 
                 </div>
             )}
 
-            <QueueCards queueStatus={queueStatus} t={t} />
+            <QueueCards queueStatus={queueStatus} t={t} healthData={healthData} />
 
             <ApiKeysPanel
                 t={t}
@@ -142,6 +145,8 @@ export default function AccountManagerContainer({ config, onRefresh, onMessage, 
                 searchQuery={searchQuery}
                 onSearchChange={handleSearchChange}
                 envBacked={Boolean(config?.env_backed)}
+                healthData={healthData}
+                queueStatus={queueStatus}
             />
 
             <AddKeyModal

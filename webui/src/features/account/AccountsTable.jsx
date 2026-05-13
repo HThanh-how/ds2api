@@ -1,6 +1,24 @@
 import { useState } from 'react'
-import { ChevronLeft, ChevronRight, Check, Copy, Pencil, Play, Plus, Trash2, FolderX } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Check, Copy, Pencil, Play, Plus, Trash2, FolderX, Clock, AlertTriangle } from 'lucide-react'
 import clsx from 'clsx'
+import { formatCooldownTime } from './useAccountHealth'
+
+const slotStatusStyle = {
+    idle: 'bg-emerald-500/20 text-emerald-500 border-emerald-500/30',
+    busy: 'bg-amber-500/20 text-amber-500 border-amber-500/30',
+    full: 'bg-blue-500/20 text-blue-500 border-blue-500/30',
+}
+const healthBadgeStyle = {
+    healthy: 'bg-emerald-500/20 text-emerald-500 border-emerald-500/30',
+    muted: 'bg-red-500/20 text-red-500 border-red-500/30',
+    rate_limited: 'bg-amber-500/20 text-amber-500 border-amber-500/30',
+    login_failed: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
+    cooldown: 'bg-blue-500/20 text-blue-500 border-blue-500/30',
+}
+const healthBadgeLabel = {
+    healthy: 'Healthy', muted: 'Muted', rate_limited: 'Rate Limited',
+    login_failed: 'Login Failed', cooldown: 'Cooldown',
+}
 
 export default function AccountsTable({
     t,
@@ -31,8 +49,15 @@ export default function AccountsTable({
     searchQuery,
     onSearchChange,
     envBacked = false,
+    healthData = {},
+    queueStatus,
 }) {
     const [copiedId, setCopiedId] = useState(null)
+    const queueAccounts = queueStatus?.accounts || []
+    const queueMap = {}
+    for (const qa of queueAccounts) {
+        queueMap[qa.id] = qa
+    }
 
     const copyId = (id) => {
         navigator.clipboard.writeText(id).then(() => {
@@ -40,6 +65,7 @@ export default function AccountsTable({
             setTimeout(() => setCopiedId(null), 1500)
         })
     }
+
     return (
         <div className="bg-card border border-border rounded-xl overflow-hidden shadow-sm">
             <div className="p-6 border-b border-border flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -100,41 +126,131 @@ export default function AccountsTable({
                 </div>
             )}
 
-            <div className="divide-y divide-border">
-                {loadingAccounts ? (
-                    <div className="p-8 text-center text-muted-foreground">{t('actions.loading')}</div>
-                ) : accounts.length > 0 ? (
-                    accounts.map((acc, i) => {
-                        const id = resolveAccountIdentifier(acc)
-                        const assignedProxy = proxies.find(proxy => proxy.id === acc.proxy_id)
-                        const runtimeUnknown = envBacked && !acc.test_status
-                        const isActive = acc.test_status === 'ok' || acc.has_token
-                        return (
-                            <div key={i} className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-muted/50 transition-colors">
-                                <div className="flex items-center gap-3 min-w-0">
-                                    <div className={clsx(
-                                        "w-2 h-2 rounded-full shrink-0",
-                                        acc.test_status === 'failed' ? "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]" :
-                                        isActive ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" :
-                                        runtimeUnknown ? "bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]" : "bg-amber-500"
-                                    )} />
-                                    <div className="min-w-0">
-                                        <div className="text-sm font-medium truncate">{acc.name || '-'}</div>
-                                        <div
-                                            className="font-medium truncate flex items-center gap-1.5 cursor-pointer hover:text-primary transition-colors group"
-                                            onClick={() => copyId(id)}
-                                        >
-                                            <span className="truncate">{id || '-'}</span>
-                                            {copiedId === id
-                                                ? <Check className="w-3 h-3 text-emerald-500 shrink-0" />
-                                                : <Copy className="w-3 h-3 opacity-0 group-hover:opacity-50 shrink-0 transition-opacity" />
-                                            }
+            <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                    <thead className="border-b border-border bg-background/50">
+                        <tr>
+                            <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs w-[220px]">Account</th>
+                            <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs w-[90px]">Slots</th>
+                            <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs w-[80px]">Status</th>
+                            <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs w-[180px]">Health</th>
+                            <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs">Info</th>
+                            <th className="text-right px-4 py-3 font-medium text-muted-foreground text-xs w-[220px]">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                        {loadingAccounts ? (
+                            <tr><td colSpan={6} className="p-8 text-center text-muted-foreground">{t('actions.loading')}</td></tr>
+                        ) : accounts.length === 0 ? (
+                            <tr><td colSpan={6} className="p-8 text-center text-muted-foreground">{searchQuery ? t('accountManager.searchNoResults') : t('accountManager.noAccounts')}</td></tr>
+                        ) : accounts.map((acc, i) => {
+                            const id = resolveAccountIdentifier(acc)
+                            const assignedProxy = proxies.find(proxy => proxy.id === acc.proxy_id)
+                            const runtimeUnknown = envBacked && !acc.test_status
+                            const isActive = acc.test_status === 'ok' || acc.has_token
+
+                            const hd = healthData[id]
+                            const hStatus = hd?.status || 'healthy'
+                            const hScore = hd?.health_score ?? 100
+                            const cooldown = formatCooldownTime(hd?.cooldown_until || hd?.mute_until)
+
+                            const qa = queueMap[id]
+                            const inUse = qa?.in_use_slots || 0
+                            const maxSlots = qa?.max_slots || 2
+                            const slotStatus = inUse >= maxSlots ? 'full' : inUse > 0 ? 'busy' : 'idle'
+                            const slotLabel = slotStatus === 'idle' ? t('monitor.statusIdle') : slotStatus === 'busy' ? t('monitor.statusBusy') : t('monitor.statusFull')
+
+                            const dotColor = hStatus === 'muted' ? "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]"
+                                : hStatus === 'rate_limited' ? "bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]"
+                                : hStatus === 'login_failed' ? "bg-gray-500 shadow-[0_0_8px_rgba(107,114,128,0.5)]"
+                                : hStatus === 'cooldown' ? "bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]"
+                                : acc.test_status === 'failed' ? "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]"
+                                : isActive ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"
+                                : runtimeUnknown ? "bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]" : "bg-amber-500"
+
+                            const healthColor = hScore >= 80 ? 'text-emerald-500' : hScore >= 50 ? 'text-amber-500' : 'text-red-500'
+                            const healthBarColor = hScore >= 80 ? 'bg-emerald-500' : hScore >= 50 ? 'bg-amber-500' : 'bg-red-500'
+
+                            return (
+                                <tr key={i} className="hover:bg-muted/30 transition-colors">
+                                    {/* Account */}
+                                    <td className="px-4 py-3">
+                                        <div className="flex items-center gap-2.5">
+                                            <div className={clsx("w-2 h-2 rounded-full shrink-0", dotColor)} />
+                                            <div className="min-w-0">
+                                                <div className="text-sm font-medium truncate">{acc.name || '-'}</div>
+                                                <div
+                                                    className="text-xs text-muted-foreground truncate flex items-center gap-1 cursor-pointer hover:text-primary transition-colors group"
+                                                    onClick={() => copyId(id)}
+                                                >
+                                                    <span className="truncate">{id || '-'}</span>
+                                                    {copiedId === id
+                                                        ? <Check className="w-3 h-3 text-emerald-500 shrink-0" />
+                                                        : <Copy className="w-3 h-3 opacity-0 group-hover:opacity-50 shrink-0 transition-opacity" />
+                                                    }
+                                                </div>
+                                                {acc.remark && (
+                                                    <div className="text-[10px] text-muted-foreground/70 truncate">{acc.remark}</div>
+                                                )}
+                                            </div>
                                         </div>
-                                        {acc.remark && (
-                                            <div className="text-xs text-muted-foreground truncate mt-0.5">{acc.remark}</div>
-                                        )}
-                                        <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
-                                            <span>{acc.test_status === 'failed' ? t('accountManager.testStatusFailed') : isActive ? t('accountManager.sessionActive') : runtimeUnknown ? t('accountManager.runtimeStatusUnknown') : t('accountManager.reauthRequired')}</span>
+                                    </td>
+
+                                    {/* Slots */}
+                                    <td className="px-4 py-3">
+                                        <div className="flex items-center gap-2">
+                                            <span className="font-mono text-xs">{inUse}/{maxSlots}</span>
+                                        </div>
+                                        <div className="mt-1 w-16 h-1.5 bg-border rounded-full overflow-hidden">
+                                            <div
+                                                className={clsx("h-full rounded-full transition-all",
+                                                    inUse >= maxSlots ? 'bg-blue-500' : inUse > 0 ? 'bg-amber-500' : 'bg-emerald-500'
+                                                )}
+                                                style={{ width: `${Math.min(100, (inUse / maxSlots) * 100)}%` }}
+                                            />
+                                        </div>
+                                    </td>
+
+                                    {/* Status */}
+                                    <td className="px-4 py-3">
+                                        <span className={clsx("inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border", slotStatusStyle[slotStatus])}>
+                                            {slotLabel}
+                                        </span>
+                                    </td>
+
+                                    {/* Health */}
+                                    <td className="px-4 py-3">
+                                        <div className="flex flex-col gap-1">
+                                            <div className="flex items-center gap-2">
+                                                <span className={clsx("font-mono text-xs font-semibold", healthColor)}>
+                                                    {Math.round(hScore)}%
+                                                </span>
+                                                <span className={clsx("inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium border",
+                                                    healthBadgeStyle[hStatus] || healthBadgeStyle.healthy
+                                                )}>
+                                                    {healthBadgeLabel[hStatus] || 'Healthy'}
+                                                </span>
+                                            </div>
+                                            <div className="w-20 h-1.5 bg-border rounded-full overflow-hidden">
+                                                <div className={clsx("h-full rounded-full transition-all", healthBarColor)}
+                                                    style={{ width: `${Math.min(100, hScore)}%` }} />
+                                            </div>
+                                            {cooldown && (
+                                                <span className="text-[10px] text-red-400 flex items-center gap-1">
+                                                    <Clock className="w-3 h-3" /> {cooldown}
+                                                </span>
+                                            )}
+                                            {hd?.last_failure_reason && hStatus !== 'healthy' && (
+                                                <span className="text-[10px] text-red-400 flex items-center gap-1 truncate max-w-[160px]" title={hd.last_failure_reason}>
+                                                    <AlertTriangle className="w-3 h-3 shrink-0" /> {hd.last_failure_reason}
+                                                </span>
+                                            )}
+                                        </div>
+                                    </td>
+
+                                    {/* Info badges */}
+                                    <td className="px-4 py-3">
+                                        <div className="flex items-center flex-wrap gap-1.5">
                                             {acc.token_preview && (
                                                 <span className="font-mono bg-muted px-1.5 py-0.5 rounded text-[10px]">
                                                     {acc.token_preview}
@@ -152,11 +268,10 @@ export default function AccountsTable({
                                                     className="flex items-center gap-1 font-mono bg-red-500/10 text-red-500 hover:bg-red-500/20 px-1.5 py-0.5 rounded text-[10px] transition-colors disabled:opacity-50"
                                                     title={t('accountManager.deleteAllSessions')}
                                                 >
-                                                    {deletingSessions && deletingSessions[id] ? (
-                                                        <span className="animate-spin">⟳</span>
-                                                    ) : (
-                                                        <FolderX className="w-3 h-3" />
-                                                    )}
+                                                    {deletingSessions && deletingSessions[id]
+                                                        ? <span className="animate-spin">⟳</span>
+                                                        : <FolderX className="w-3 h-3" />
+                                                    }
                                                 </button>
                                             )}
                                             {acc.proxy_id && (
@@ -165,50 +280,52 @@ export default function AccountsTable({
                                                 </span>
                                             )}
                                         </div>
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-2 self-start lg:self-auto ml-5 lg:ml-0">
-                                    <select
-                                        value={acc.proxy_id || ''}
-                                        onChange={e => onUpdateAccountProxy(id, e.target.value)}
-                                        disabled={updatingProxy?.[id]}
-                                        className="max-w-[180px] px-2.5 py-1.5 text-[10px] lg:text-xs bg-secondary border border-border rounded-md focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
-                                    >
-                                        <option value="">{t('accountManager.proxyNone')}</option>
-                                        {proxies.map(proxy => (
-                                            <option key={proxy.id} value={proxy.id}>
-                                                {proxy.name || `${proxy.host}:${proxy.port}`}
-                                            </option>
-                                        ))}
-                                    </select>
-                                    <button
-                                        onClick={() => onEditAccount(acc)}
-                                        disabled={!id}
-                                        className="p-1 lg:p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                                        title={id ? t('accountManager.editAccountTitle') : t('accountManager.invalidIdentifier')}
-                                    >
-                                        <Pencil className="w-3.5 h-3.5 lg:w-4 lg:h-4" />
-                                    </button>
-                                    <button
-                                        onClick={() => onTestAccount(id)}
-                                        disabled={testing[id]}
-                                        className="px-2 lg:px-3 py-1 lg:py-1.5 text-[10px] lg:text-xs font-medium border border-border rounded-md hover:bg-secondary transition-colors disabled:opacity-50"
-                                    >
-                                        {testing[id] ? t('actions.testing') : t('actions.test')}
-                                    </button>
-                                    <button
-                                        onClick={() => onDeleteAccount(id)}
-                                        className="p-1 lg:p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-md transition-colors"
-                                    >
-                                        <Trash2 className="w-3.5 h-3.5 lg:w-4 lg:h-4" />
-                                    </button>
-                                </div>
-                            </div>
-                        )
-                    })
-                ) : (
-                    <div className="p-8 text-center text-muted-foreground">{searchQuery ? t('accountManager.searchNoResults') : t('accountManager.noAccounts')}</div>
-                )}
+                                    </td>
+
+                                    {/* Actions */}
+                                    <td className="px-4 py-3">
+                                        <div className="flex items-center gap-1.5 justify-end">
+                                            <select
+                                                value={acc.proxy_id || ''}
+                                                onChange={e => onUpdateAccountProxy(id, e.target.value)}
+                                                disabled={updatingProxy?.[id]}
+                                                className="max-w-[140px] px-2 py-1 text-[10px] bg-secondary border border-border rounded-md focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
+                                            >
+                                                <option value="">{t('accountManager.proxyNone')}</option>
+                                                {proxies.map(proxy => (
+                                                    <option key={proxy.id} value={proxy.id}>
+                                                        {proxy.name || `${proxy.host}:${proxy.port}`}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                            <button
+                                                onClick={() => onEditAccount(acc)}
+                                                disabled={!id}
+                                                className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-md transition-colors disabled:opacity-40"
+                                                title={id ? t('accountManager.editAccountTitle') : t('accountManager.invalidIdentifier')}
+                                            >
+                                                <Pencil className="w-3.5 h-3.5" />
+                                            </button>
+                                            <button
+                                                onClick={() => onTestAccount(id)}
+                                                disabled={testing[id]}
+                                                className="px-2 py-1 text-[10px] font-medium border border-border rounded-md hover:bg-secondary transition-colors disabled:opacity-50"
+                                            >
+                                                {testing[id] ? t('actions.testing') : t('actions.test')}
+                                            </button>
+                                            <button
+                                                onClick={() => onDeleteAccount(id)}
+                                                className="p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-md transition-colors"
+                                            >
+                                                <Trash2 className="w-3.5 h-3.5" />
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            )
+                        })}
+                    </tbody>
+                </table>
             </div>
 
             {totalPages > 1 && (

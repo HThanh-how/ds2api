@@ -164,7 +164,7 @@ func (s *Store) getSWR(key string, fetchFn func() (any, int, error)) (any, int, 
 	}
 
 	// 2. STALE: >= 3s and < 30m (Return stale immediately, fetch in background)
-	if !updatedAt.IsZero() && now.Sub(updatedAt) < 30*time.Minute {
+	if !updatedAt.IsZero() && os.Getenv("VERCEL") != "1" && now.Sub(updatedAt) < 30*time.Minute {
 		if !isFetching {
 			item.mu.Lock()
 			if !item.isFetching {

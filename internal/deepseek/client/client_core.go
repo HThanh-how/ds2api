@@ -16,9 +16,18 @@ import (
 // intFrom is a package-internal alias for the shared util version.
 var intFrom = util.IntFrom
 
+type HealthReporter interface {
+	RecordSuccess(accountID string)
+	RecordMute(accountID string, muteUntil float64)
+	RecordRateLimit(accountID string)
+	RecordLoginFailure(accountID string)
+	RecordUploadFailure(accountID string)
+}
+
 type Client struct {
 	Store      *config.Store
 	Auth       *auth.Resolver
+	Health     HealthReporter
 	capture    *devcapture.Store
 	regular    trans.Doer
 	stream     trans.Doer

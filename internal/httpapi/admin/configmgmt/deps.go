@@ -1,6 +1,7 @@
 package configmgmt
 
 import (
+	"ds2api/internal/auth"
 	"ds2api/internal/chathistory"
 	"ds2api/internal/config"
 	adminshared "ds2api/internal/httpapi/admin/shared"
@@ -12,6 +13,7 @@ type Handler struct {
 	DS          adminshared.DeepSeekCaller
 	OpenAI      adminshared.OpenAIChatCaller
 	ChatHistory *chathistory.Store
+	APIKeyCache *auth.APIKeyCache
 }
 
 var writeJSON = adminshared.WriteJSON

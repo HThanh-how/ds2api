@@ -139,6 +139,9 @@ func (h *Handler) configImport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.Pool.Reset()
+	if h.APIKeyCache != nil {
+		h.APIKeyCache.InvalidateAllPositive()
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"success":           true,
 		"mode":              mode,

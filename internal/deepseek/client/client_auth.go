@@ -70,10 +70,20 @@ func (c *Client) CreateSession(ctx context.Context, a *auth.RequestAuth, maxAtte
 		if status == http.StatusOK && code == 0 && bizCode == 0 {
 			sessionID := extractCreateSessionID(resp)
 			if sessionID != "" {
+				if c.Health != nil {
+					c.Health.RecordSuccess(a.AccountID)
+				}
 				return sessionID, nil
 			}
 		}
 		config.Logger.Warn("[create_session] failed", "status", status, "code", code, "biz_code", bizCode, "msg", msg, "biz_msg", bizMsg, "use_config_token", a.UseConfigToken, "account", a.AccountID)
+		if c.Health != nil {
+			if isMuteResponse(bizCode) {
+				c.Health.RecordMute(a.AccountID, extractMuteUntil(resp))
+			} else {
+				c.Health.RecordLoginFailure(a.AccountID)
+			}
+		}
 		if a.UseConfigToken {
 			if !refreshed && shouldAttemptRefresh(status, code, bizCode, msg, bizMsg) {
 				if c.Auth.RefreshToken(ctx, a) {
@@ -133,6 +143,9 @@ func (c *Client) GetPowForTarget(ctx context.Context, a *auth.RequestAuth, targe
 			return BuildPowHeader(challenge, answer)
 		}
 		config.Logger.Warn("[get_pow] failed", "status", status, "code", code, "biz_code", bizCode, "msg", msg, "biz_msg", bizMsg, "use_config_token", a.UseConfigToken, "account", a.AccountID, "target_path", targetPath)
+		if c.Health != nil && isMuteResponse(bizCode) {
+			c.Health.RecordMute(a.AccountID, extractMuteUntil(resp))
+		}
 		lastFailureMessage = failureMessage(msg, bizMsg, "get pow failed")
 		if isTokenInvalid(status, code, bizCode, msg, bizMsg) || isAuthIndicativeBizFailure(msg, bizMsg) {
 			lastFailureKind = authFailureKind(a.UseConfigToken)

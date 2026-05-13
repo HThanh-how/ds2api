@@ -20,6 +20,7 @@ import (
 	"ds2api/internal/chathistory"
 	"ds2api/internal/config"
 	dsclient "ds2api/internal/deepseek/client"
+	"ds2api/internal/health"
 	"ds2api/internal/httpapi/admin"
 	"ds2api/internal/httpapi/claude"
 	"ds2api/internal/httpapi/gemini"
@@ -53,6 +54,8 @@ func NewApp() (*App, error) {
 	resolver := auth.NewResolver(store, pool, func(ctx context.Context, acc config.Account) (string, error) {
 		return dsClient.Login(ctx, acc)
 	})
+	apiKeyCache := auth.NewAPIKeyCache()
+	resolver.SetAPIKeyCache(apiKeyCache)
 	dsClient = dsclient.NewClient(store, resolver)
 	if err := dsClient.PreloadPow(context.Background()); err != nil {
 		config.Logger.Warn("[PoW] init failed", "error", err)
@@ -63,7 +66,13 @@ func NewApp() (*App, error) {
 	if err := chatHistoryStore.Err(); err != nil {
 		config.Logger.Warn("[chat_history] unavailable", "path", chatHistoryStore.Path(), "error", err)
 	}
-	usagelog.InitStoreWithTurso(config.UsageLogPath(), 5000, store.TursoConfig().URL, store.TursoConfig().Token)
+	tursoCfg := store.TursoConfig()
+	usagelog.InitStoreWithTurso(config.UsageLogPath(), 5000, tursoCfg.URL, tursoCfg.Token)
+
+	healthTracker := health.Init(tursoCfg.URL, tursoCfg.Token)
+	pool.SetHealthChecker(healthTracker)
+	dsClient.Health = healthTracker
+	resolver.LoginFailReporter = healthTracker
 
 	modelsHandler := &shared.ModelsHandler{Store: store}
 	chatHandler := &chat.Handler{Store: store, Auth: resolver, DS: dsClient, ChatHistory: chatHistoryStore}
@@ -72,7 +81,7 @@ func NewApp() (*App, error) {
 	embeddingsHandler := &embeddings.Handler{Store: store, Auth: resolver, DS: dsClient, ChatHistory: chatHistoryStore}
 	claudeHandler := &claude.Handler{Store: store, Auth: resolver, DS: dsClient, OpenAI: chatHandler, ChatHistory: chatHistoryStore}
 	geminiHandler := &gemini.Handler{Store: store, Auth: resolver, DS: dsClient, OpenAI: chatHandler, ChatHistory: chatHistoryStore}
-	adminHandler := &admin.Handler{Store: store, Pool: pool, DS: dsClient, OpenAI: chatHandler, ChatHistory: chatHistoryStore}
+	adminHandler := &admin.Handler{Store: store, Pool: pool, DS: dsClient, OpenAI: chatHandler, ChatHistory: chatHistoryStore, APIKeyCache: apiKeyCache}
 	ollamaHandler := &ollama.Handler{Store: store}
 	webuiHandler := webui.NewHandler()
 
