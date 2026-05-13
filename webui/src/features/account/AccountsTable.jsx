@@ -171,8 +171,8 @@ export default function AccountsTable({
                             const healthColor = hScore >= 80 ? 'text-emerald-500' : hScore >= 50 ? 'text-amber-500' : 'text-red-500'
                             const healthBarColor = hScore >= 80 ? 'bg-emerald-500' : hScore >= 50 ? 'bg-amber-500' : 'bg-red-500'
 
-                            return (
-                                <tr key={i} className="hover:bg-muted/30 transition-colors">
+                                return (
+                                <tr key={id ? `acc-${id}` : `acc-idx-${i}`} className="hover:bg-muted/30 transition-colors">
                                     {/* Account */}
                                     <td className="px-4 py-3">
                                         <div className="flex items-center gap-2.5">

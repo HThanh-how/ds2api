@@ -12,7 +12,25 @@ import (
 	"ds2api/internal/config"
 )
 
+func (h *Handler) accountListItem(acc config.Account) map[string]any {
+	testStatus, _ := h.Store.AccountTestStatus(acc.Identifier())
+	token := strings.TrimSpace(acc.Token)
+	return map[string]any{
+		"identifier":    acc.Identifier(),
+		"name":          acc.Name,
+		"remark":        acc.Remark,
+		"email":         acc.Email,
+		"mobile":        acc.Mobile,
+		"proxy_id":      acc.ProxyID,
+		"has_password":  acc.Password != "",
+		"has_token":     token != "",
+		"token_preview": maskSecretPreview(token),
+		"test_status":   testStatus,
+	}
+}
+
 func (h *Handler) listAccounts(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	page := intFromQuery(r, "page", 1)
 	pageSize := intFromQuery(r, "page_size", 10)
 	if page < 1 {
@@ -56,25 +74,13 @@ func (h *Handler) listAccounts(w http.ResponseWriter, r *http.Request) {
 	}
 	items := make([]map[string]any, 0, end-start)
 	for _, acc := range accounts[start:end] {
-		testStatus, _ := h.Store.AccountTestStatus(acc.Identifier())
-		token := strings.TrimSpace(acc.Token)
-		items = append(items, map[string]any{
-			"identifier":    acc.Identifier(),
-			"name":          acc.Name,
-			"remark":        acc.Remark,
-			"email":         acc.Email,
-			"mobile":        acc.Mobile,
-			"proxy_id":      acc.ProxyID,
-			"has_password":  acc.Password != "",
-			"has_token":     token != "",
-			"token_preview": maskSecretPreview(token),
-			"test_status":   testStatus,
-		})
+		items = append(items, h.accountListItem(acc))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": total, "page": page, "page_size": pageSize, "total_pages": totalPages})
 }
 
 func (h *Handler) addAccount(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	var req map[string]any
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	acc := toAccount(req)
@@ -105,7 +111,16 @@ func (h *Handler) addAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.Pool.Reset()
-	writeJSON(w, http.StatusOK, map[string]any{"success": true, "total_accounts": len(h.Store.Snapshot().Accounts)})
+	snap := h.Store.Snapshot()
+	wantID := acc.Identifier()
+	resp := map[string]any{"success": true, "total_accounts": len(snap.Accounts)}
+	for i := range snap.Accounts {
+		if snap.Accounts[i].Identifier() == wantID {
+			resp["item"] = h.accountListItem(snap.Accounts[i])
+			break
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *Handler) updateAccount(w http.ResponseWriter, r *http.Request) {

@@ -110,6 +110,38 @@ func TestAddAccountRejectsCanonicalMobileDuplicate(t *testing.T) {
 	}
 }
 
+func TestAddAccountReturnsItemMatchingListAPI(t *testing.T) {
+	h := newAdminTestHandler(t, `{"accounts":[{"email":"a@example.com","password":"p1"}]}`)
+
+	r := chi.NewRouter()
+	r.Post("/admin/accounts", h.addAccount)
+	body := []byte(`{"email":"b@example.com","password":"p2","name":"B"}`)
+	req := httptest.NewRequest(http.MethodPost, "/admin/accounts", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	item, ok := payload["item"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected item in response, got %#v", payload)
+	}
+	if got, _ := item["identifier"].(string); got != "b@example.com" {
+		t.Fatalf("identifier=%q", got)
+	}
+	if got, _ := item["name"].(string); got != "B" {
+		t.Fatalf("name=%q", got)
+	}
+	if got := len(h.Store.Accounts()); got != 2 {
+		t.Fatalf("store accounts want=2 got=%d", got)
+	}
+}
+
 func TestFindAccountByIdentifierSupportsMobile(t *testing.T) {
 	h := newAdminTestHandler(t, `{
 		"accounts":[

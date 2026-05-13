@@ -28,6 +28,7 @@ export default function AccountManagerContainer({ config, onRefresh, onMessage, 
         resolveAccountIdentifier,
         searchQuery,
         handleSearchChange,
+        fetchAccountsFirstPageClearSearch,
     } = useAccountsData({ apiFetch })
 
     const { healthData } = useAccountHealth({ apiFetch })
@@ -76,6 +77,7 @@ export default function AccountManagerContainer({ config, onRefresh, onMessage, 
         onRefresh,
         config,
         fetchAccounts,
+        fetchAccountsFirstPageClearSearch,
         resolveAccountIdentifier,
     })
 

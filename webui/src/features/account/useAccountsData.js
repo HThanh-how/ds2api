@@ -18,17 +18,43 @@ export function useAccountsData({ apiFetch }) {
 
     const [searchQuery, setSearchQuery] = useState('')
 
-    const fetchAccounts = async (targetPage = page, targetPageSize = pageSize, targetQuery = searchQuery) => {
+    const accountRowId = (row) => {
+        if (!row || typeof row !== 'object') return ''
+        return String(row.identifier || row.email || row.mobile || '').trim()
+    }
+
+    /**
+     * @param {number} [targetPage]
+     * @param {number} [targetPageSize]
+     * @param {string} [targetQuery]
+     * @param {Record<string, unknown>|null} [ensureItem] Row from POST /admin/accounts merged in if missing (stale GET / replicas).
+     */
+    const fetchAccounts = async (targetPage = page, targetPageSize = pageSize, targetQuery = searchQuery, ensureItem = null) => {
         setLoadingAccounts(true)
         try {
-            let url = `/admin/accounts?page=${targetPage}&page_size=${targetPageSize}`
+            let url = `/admin/accounts?page=${targetPage}&page_size=${targetPageSize}&_ts=${Date.now()}`
             if (targetQuery.trim()) url += `&q=${encodeURIComponent(targetQuery.trim())}`
             const res = await apiFetch(url)
             if (res.ok) {
                 const data = await res.json()
-                setAccounts(data.items || [])
+                const cap = Number(data.page_size) || targetPageSize
+                let items = [...(data.items || [])]
+                const want = accountRowId(ensureItem)
+                let mergedMissing = false
+                if (want) {
+                    const has = items.some((a) => accountRowId(a) === want)
+                    if (!has) {
+                        mergedMissing = true
+                        items = [ensureItem, ...items.filter((a) => accountRowId(a) !== want)]
+                        if (items.length > cap) {
+                            items = items.slice(0, cap)
+                        }
+                    }
+                }
+                setAccounts(items)
                 setTotalPages(data.total_pages || 1)
-                setTotalAccounts(data.total || 0)
+                const baseTotal = Number(data.total) || 0
+                setTotalAccounts(mergedMissing ? Math.max(baseTotal, items.length) : baseTotal)
                 setPage(data.page || 1)
             }
         } catch (e) {
@@ -46,6 +72,12 @@ export function useAccountsData({ apiFetch }) {
     const handleSearchChange = (query) => {
         setSearchQuery(query)
         fetchAccounts(1, pageSize, query)
+    }
+
+    /** After add, clear search and reload page 1; pass `item` from POST body if list GET is briefly stale. */
+    const fetchAccountsFirstPageClearSearch = async (ensureItem = null) => {
+        setSearchQuery('')
+        await fetchAccounts(1, pageSize, '', ensureItem)
     }
 
     const fetchQueueStatus = async () => {
@@ -82,5 +114,6 @@ export function useAccountsData({ apiFetch }) {
         resolveAccountIdentifier,
         searchQuery,
         handleSearchChange,
+        fetchAccountsFirstPageClearSearch,
     }
 }

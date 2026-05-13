@@ -1,6 +1,15 @@
 import { useState } from 'react'
 
-export function useAccountActions({ apiFetch, t, onMessage, onRefresh, config, fetchAccounts, resolveAccountIdentifier }) {
+export function useAccountActions({
+    apiFetch,
+    t,
+    onMessage,
+    onRefresh,
+    config,
+    fetchAccounts,
+    fetchAccountsFirstPageClearSearch,
+    resolveAccountIdentifier,
+}) {
     const [showAddKey, setShowAddKey] = useState(false)
     const [editingKey, setEditingKey] = useState(null)
     const [showAddAccount, setShowAddAccount] = useState(false)
@@ -144,8 +153,19 @@ export function useAccountActions({ apiFetch, t, onMessage, onRefresh, config, f
             if (res.ok) {
                 onMessage('success', t('accountManager.addAccountSuccess'))
                 closeAddAccount()
-                fetchAccounts(1)
-                onRefresh()
+                let createdItem = null
+                try {
+                    const body = await res.json()
+                    createdItem = body?.item || null
+                } catch (_e) {
+                    createdItem = null
+                }
+                if (fetchAccountsFirstPageClearSearch) {
+                    await fetchAccountsFirstPageClearSearch(createdItem)
+                } else {
+                    await fetchAccounts(1, undefined, '', createdItem)
+                }
+                await onRefresh?.()
             } else {
                 const data = await res.json()
                 onMessage('error', data.detail || t('messages.failedToAdd'))
