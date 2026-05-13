@@ -23,10 +23,16 @@ var (
 // APIKeyCache implements a small in-process verification layer on top of
 // config.Store API keys: positive entries reduce HasAPIKey pressure; revoked
 // entries keep recently deleted keys from being treated as passthrough tokens.
+//
+// Stale-while-revalidate (SWR): while a positive entry is within apiKeyPositiveTTL
+// but older than apiKeyRevalidate, ManagedByConfigStore returns the cached "managed"
+// result immediately and kicks a single background refresh against the store.
+// Admin-driven RegisterRevokedKey / Invalidate* still apply synchronously.
 type APIKeyCache struct {
-	mu       sync.Mutex
-	positive map[string]*apiKeyPosEntry
-	revoked  map[string]time.Time // key hash -> block until (wall clock)
+	mu         sync.Mutex
+	positive   map[string]*apiKeyPosEntry
+	revoked    map[string]time.Time // key hash -> block until (wall clock)
+	refreshing map[string]struct{}  // SWR: at most one in-flight refresh per key hash
 }
 
 type apiKeyPosEntry struct {
@@ -36,8 +42,9 @@ type apiKeyPosEntry struct {
 
 func NewAPIKeyCache() *APIKeyCache {
 	return &APIKeyCache{
-		positive: make(map[string]*apiKeyPosEntry),
-		revoked:  make(map[string]time.Time),
+		positive:   make(map[string]*apiKeyPosEntry),
+		revoked:    make(map[string]time.Time),
+		refreshing: make(map[string]struct{}),
 	}
 }
 
@@ -64,9 +71,11 @@ func (c *APIKeyCache) InvalidateOne(raw string) {
 	if c == nil || raw == "" {
 		return
 	}
+	h := apiKeyHash(raw)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	delete(c.positive, apiKeyHash(raw))
+	delete(c.positive, h)
+	delete(c.refreshing, h)
 }
 
 // InvalidateAllPositive drops all positive entries (e.g. bulk config change).
@@ -77,6 +86,7 @@ func (c *APIKeyCache) InvalidateAllPositive() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.positive = make(map[string]*apiKeyPosEntry)
+	c.refreshing = make(map[string]struct{})
 }
 
 // RegisterRevokedKey blocks this exact key string for apiKeyRevokedBlock.
@@ -90,6 +100,7 @@ func (c *APIKeyCache) RegisterRevokedKey(raw string) {
 	c.sweepExpiredLocked(now)
 	h := apiKeyHash(raw)
 	delete(c.positive, h)
+	delete(c.refreshing, h)
 	c.revoked[h] = now.Add(apiKeyRevokedBlock)
 }
 
@@ -124,13 +135,12 @@ func (c *APIKeyCache) ManagedByConfigStore(store *config.Store, raw string) (boo
 		if now.Sub(e.lastVerified) < apiKeyRevalidate {
 			return true, nil
 		}
-		if !store.HasAPIKey(raw) {
-			delete(c.positive, h)
-			c.revoked[h] = now.Add(apiKeyRevokedBlock)
-			return false, ErrAPIKeyRevoked
+		// Stale but still within positive TTL: serve cached true, revalidate in background (SWR).
+		if _, busy := c.refreshing[h]; !busy {
+			c.refreshing[h] = struct{}{}
+			rawCopy := raw
+			go c.backgroundRefreshPositive(h, rawCopy, store)
 		}
-		e.lastVerified = now
-		e.expiresAt = now.Add(apiKeyPositiveTTL)
 		return true, nil
 	}
 	delete(c.positive, h)
@@ -139,4 +149,32 @@ func (c *APIKeyCache) ManagedByConfigStore(store *config.Store, raw string) (boo
 		return true, nil
 	}
 	return false, nil
+}
+
+func (c *APIKeyCache) backgroundRefreshPositive(h, raw string, store *config.Store) {
+	if c == nil || store == nil {
+		return
+	}
+	ok := store.HasAPIKey(raw)
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	delete(c.refreshing, h)
+
+	now := time.Now()
+	if until, okRev := c.revoked[h]; okRev && now.Before(until) {
+		return
+	}
+	if !ok {
+		delete(c.positive, h)
+		c.revoked[h] = now.Add(apiKeyRevokedBlock)
+		return
+	}
+	if e := c.positive[h]; e != nil {
+		e.lastVerified = now
+		e.expiresAt = now.Add(apiKeyPositiveTTL)
+		return
+	}
+	c.positive[h] = &apiKeyPosEntry{lastVerified: now, expiresAt: now.Add(apiKeyPositiveTTL)}
 }

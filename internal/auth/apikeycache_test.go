@@ -26,7 +26,7 @@ func TestAPIKeyCacheManagedPositiveAndRevoke(t *testing.T) {
 	}
 }
 
-func TestAPIKeyCacheRevalidateRemovesStalePositive(t *testing.T) {
+func TestAPIKeyCacheSWRStaleThenBackgroundRevoke(t *testing.T) {
 	t.Setenv("DS2API_CONFIG_JSON", `{"keys":["sk-a"],"accounts":[]}`)
 	st := config.LoadStore()
 	c := NewAPIKeyCache()
@@ -43,9 +43,14 @@ func TestAPIKeyCacheRevalidateRemovesStalePositive(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := c.ManagedByConfigStore(st, "sk-a")
-	if err != ErrAPIKeyRevoked {
-		t.Fatalf("expected ErrAPIKeyRevoked after store drop, got %v", err)
+	ok1, err1 := c.ManagedByConfigStore(st, "sk-a")
+	if err1 != nil || !ok1 {
+		t.Fatalf("expected SWR stale hit (true), ok=%v err=%v", ok1, err1)
+	}
+	time.Sleep(80 * time.Millisecond)
+	_, err2 := c.ManagedByConfigStore(st, "sk-a")
+	if err2 != ErrAPIKeyRevoked {
+		t.Fatalf("after background refresh expected ErrAPIKeyRevoked, got %v", err2)
 	}
 }
 
